@@ -5,8 +5,6 @@ The reason for this for in qsopt_ex is to add a timing function to certain funct
 QSopt Exact
 ===========
 
-[![Build Status](https://travis-ci.org/jonls/qsopt-ex.svg?branch=master)](https://travis-ci.org/jonls/qsopt-ex)
-
 Exact linear programming solver. This is a fork of QSopt_ex, originally
 released by Daniel Espinoza _et al._
 [version 2.5.10](http://www.math.uwaterloo.ca/~bico/qsopt/ex/) under the
