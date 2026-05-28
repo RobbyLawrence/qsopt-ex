@@ -36,6 +36,7 @@ Makefile
 Makefile.in
 
 /test-driver
+/tap-driver.sh
 
 # http://www.gnu.org/software/autoconf
 
@@ -54,3 +55,14 @@ Makefile.in
 /config.log
 /config.status
 /config.sub
+
+# Problems
+Problems/
+
+# Out-of-source build directory
+/build/
+
+# IDE compilation database and config
+compile_commands.json
+.clangd
+.cache/

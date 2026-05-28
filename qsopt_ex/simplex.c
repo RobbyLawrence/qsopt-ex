@@ -29,6 +29,7 @@ static int TRACE = 0;
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "logging-private.h"
 
@@ -55,6 +56,7 @@ static int TRACE = 0;
 #include "qsopt_EGLPNUM_TYPENAME.h"
 #include "lib_EGLPNUM_TYPENAME.h"								/* for EGLPNUM_TYPENAME_ILLlib_writebasis */
 #include "lp_EGLPNUM_TYPENAME.h"									/* for EGLPNUM_TYPENAME_ILLwrite_lp */
+#include "timing_log.h"
 
 
 static void init_lp_status_info (

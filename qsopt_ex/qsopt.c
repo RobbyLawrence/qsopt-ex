@@ -162,6 +162,7 @@ static int TRACE = 0;
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "qsopt_EGLPNUM_TYPENAME.h"
 
@@ -181,6 +182,7 @@ static int TRACE = 0;
 #include "lib_EGLPNUM_TYPENAME.h"
 #include "mps_EGLPNUM_TYPENAME.h"
 #include "lp_EGLPNUM_TYPENAME.h"
+#include "timing_log.h"
 
 
 void EGLPNUM_TYPENAME_QSset_precision (const unsigned prec) {
@@ -200,6 +202,7 @@ static int opt_work ( EGLPNUM_TYPENAME_QSdata * p, int *status, int primal_or_du
 
 EGLPNUM_TYPENAME_QSLIB_INTERFACE int EGLPNUM_TYPENAME_QSopt_primal (EGLPNUM_TYPENAME_QSdata * p, int *status)
 {
+	clock_t start = clock();
 	int rval = 0;
 
 	if (status)
@@ -222,6 +225,11 @@ EGLPNUM_TYPENAME_QSLIB_INTERFACE int EGLPNUM_TYPENAME_QSopt_primal (EGLPNUM_TYPE
 	}
 
 CLEANUP:
+	{
+		clock_t end = clock();
+		double duration = (double)(end - start) / CLOCKS_PER_SEC;
+		log_timing("EGLPNUM_TYPENAME_QSopt_primal took ", duration);
+	}
 
 	EG_RETURN (rval);
 }

@@ -28,6 +28,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "qs_config.h"
 #include "logging-private.h"
@@ -48,6 +49,7 @@
 #include "read_lp_EGLPNUM_TYPENAME.h"
 #include "lp_EGLPNUM_TYPENAME.h"
 #include "lib_EGLPNUM_TYPENAME.h"
+#include "timing_log.h"
 
 static int TRACE = 0;
 
@@ -333,6 +335,7 @@ CLEANUP:
 
 int EGLPNUM_TYPENAME_ILLeditor_solve (EGLPNUM_TYPENAME_QSdata * p, int salgo)
 {
+	clock_t start = clock();
 	int rval = 0;
 	int status = 0;
 	EGLPNUM_TYPE val;
@@ -356,6 +359,11 @@ int EGLPNUM_TYPENAME_ILLeditor_solve (EGLPNUM_TYPENAME_QSdata * p, int salgo)
 									status);
 		}
 CLEANUP:
+	{
+		clock_t end = clock();
+		double duration = (double)(end - start) / CLOCKS_PER_SEC;
+		log_timing("EGLPNUM_TYPENAME_ILLeditor_solve took ", duration);
+	}
 	EGLPNUM_TYPENAME_EGlpNumClearVar (val);
 	ILL_RESULT (rval, "EGLPNUM_TYPENAME_ILLeditor_solve");
 }

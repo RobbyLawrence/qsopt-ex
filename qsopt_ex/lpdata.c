@@ -66,6 +66,7 @@
 
 #include <stdlib.h>
 #include <stdarg.h>
+#include <time.h>
 
 #include "qs_config.h"
 #include "logging-private.h"
@@ -81,6 +82,7 @@
 #include "lp_EGLPNUM_TYPENAME.h"
 #include "mps_EGLPNUM_TYPENAME.h"
 #include "rawlp_EGLPNUM_TYPENAME.h"
+#include "timing_log.h"
 
 //static int TRACE = 0;
 
@@ -556,6 +558,7 @@ int EGLPNUM_TYPENAME_ILLlp_rows_init (
 	EGLPNUM_TYPENAME_ILLlpdata * lp,
 	int include_logicals)
 {
+	clock_t start = clock();
 	int rval = 0;
 	int i, k, st;
 	int *beg, *cnt, *ind;
@@ -683,6 +686,11 @@ int EGLPNUM_TYPENAME_ILLlp_rows_init (
 		}
 	}
 CLEANUP:
+	{
+		clock_t end = clock();
+		double duration = (double)(end - start) / CLOCKS_PER_SEC;
+		log_timing("EGLPNUM_TYPENAME_ILLlp_rows_init took ", duration);
+	}
 
 	if (rval)
 	{
