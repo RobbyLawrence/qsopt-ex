@@ -48,6 +48,8 @@ static int TRACE = 0;
 #include "ratio_EGLPNUM_TYPENAME.h"
 #include "dstruct_EGLPNUM_TYPENAME.h"
 
+#include "basis_snapshot.h"
+
 
 EGLPNUM_TYPENAME_bndinfo *EGLPNUM_TYPENAME_ILLfct_new_bndinfo (
 	void)
@@ -660,6 +662,7 @@ void EGLPNUM_TYPENAME_ILLfct_update_basis_info (
 		lp->baz[lindex] = evar;
 		lp->nbaz[eindex] = lvar;
 		(lp->basisid)++;
+		basis_snapshot_push (lp->baz);
 	}
 	else
 	{

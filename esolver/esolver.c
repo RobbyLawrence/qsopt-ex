@@ -1,22 +1,22 @@
 /* ========================================================================= */
-/* ESolver "Exact Mixed Integer Linear Solver" provides some basic structures 
+/* ESolver "Exact Mixed Integer Linear Solver" provides some basic structures
  * and algorithms commons in solving MIP's
  *
  * Copyright (C) 2008 David Applegate, Bill Cook, Sanjeeb Dash, Daniel Espinoza.
- * 
+ *
  * This library is free software; you can redistribute it and/or modify it
  * under the terms of the GNU Lesser General Public License as published by the
  * Free Software Foundation; either version 2.1 of the License, or (at your
  * option) any later version.
  *
- * This library is distributed in the hope that it will be useful, but 
- * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY 
- * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public 
+ * This library is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public
  * License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
  * along with this library; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA 
+ * Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  * */
 /* ========================================================================= */
 #ifdef HAVE_CONFIG_H
@@ -29,12 +29,17 @@
 #include <time.h>
 #include <sys/resource.h>
 
+#include <sys/stat.h>
+#include <errno.h>
+#include <string.h>
+
 #include "QSopt_ex.h"
 
 #include "except.h"
 #include "logging-private.h"
 #include "qs_config.h"
 #include "timing_log.h"
+#include "basis_snapshot.h"
 
 /* ========================================================================= */
 /** @name static parameters for the main program */
@@ -86,7 +91,7 @@ static void usage (char *s)
 	fprintf (stderr, "   -v    print QSopt version number\n");
 	fprintf (stderr, "   -R n  maximum running time allowed, default %lf\n",
 						max_rtime);
-	fprintf (stderr, "   -m n  maximum memory usage allowed, default %lu\n", 
+	fprintf (stderr, "   -m n  maximum memory usage allowed, default %lu\n",
 						memlimit);
 }
 
@@ -143,7 +148,7 @@ static int mem_limits(void)
 		// fprintf(stderr, "Cur rtime limit %ld, trying to set to %lg\n", mlim.rlim_cur, max_rtime);
 	if(max_rtime > mlim.rlim_max) max_rtime = (double)mlim.rlim_max;
 	mlim.rlim_cur = (rlim_t)max_rtime;
-	
+
 	// const struct rlimit lim_test = {
     // 	rlim_t rlim_cur = mlim.rlim_cur; /* Soft limit */
     // 	rlim_t rlim_max = mlim.rlim_max; /* Hard limit (ceiling for rlim_cur) */
@@ -153,35 +158,35 @@ static int mem_limits(void)
 	TESTERRNOIF(rval);
 	fprintf(stderr, "New rtime limit %ju (%.3lg)\n", (intmax_t) mlim.rlim_cur, max_rtime);
 		// fprintf(stderr, "New rtime limit %ld (%.3lg)\n", mlim.rlim_cur, max_rtime);
-	
+
 	rval = getrlimit(RLIMIT_DATA,&mlim);
 	TESTERRNOIF(rval);
 	fprintf(stderr, "Cur data limit %ld,%ld (soft,hard)\n", mlim.rlim_cur, mlim.rlim_max);
-	
-	mlim.rlim_cur = memlimit;				
-	rval = setrlimit(RLIMIT_DATA,&mlim);				
+
+	mlim.rlim_cur = memlimit;
+	rval = setrlimit(RLIMIT_DATA,&mlim);
 	TESTERRNOIF(rval);
 	rval = getrlimit(RLIMIT_DATA,&mlim);
 	TESTERRNOIF(rval);
 	fprintf(stderr, "New data limit %ld,%ld (soft,hard)\n", mlim.rlim_cur, mlim.rlim_max);
-	
+
 	rval = getrlimit(RLIMIT_AS,&mlim);
 	TESTERRNOIF(rval);
-	fprintf(stderr, "Cur address space limit %ld,%ld (soft,hard)\n", 
+	fprintf(stderr, "Cur address space limit %ld,%ld (soft,hard)\n",
 					mlim.rlim_cur, mlim.rlim_max);
-	mlim.rlim_cur = memlimit;	
-	rval = setrlimit(RLIMIT_AS,&mlim);				
+	mlim.rlim_cur = memlimit;
+	rval = setrlimit(RLIMIT_AS,&mlim);
 	TESTERRNOIF(rval);
 	rval = getrlimit(RLIMIT_AS,&mlim);
 	TESTERRNOIF(rval);
-	fprintf(stderr, "New address space limit %ld,%ld (soft,hard)\n", 
+	fprintf(stderr, "New address space limit %ld,%ld (soft,hard)\n",
 					mlim.rlim_cur, mlim.rlim_max);
 	mlim.rlim_cur = 0;
-	rval = setrlimit(RLIMIT_CORE,&mlim);				
+	rval = setrlimit(RLIMIT_CORE,&mlim);
 	TESTERRNOIF(rval);
 	rval = getrlimit(RLIMIT_CORE,&mlim);
 	TESTERRNOIF(rval);
-	fprintf(stderr, "New core dump space limit %ld,%ld (soft,hard)\n", 
+	fprintf(stderr, "New core dump space limit %ld,%ld (soft,hard)\n",
 					mlim.rlim_cur, mlim.rlim_max);
 	/* set signal handler for SIGXCPU */
 	signal(SIGXCPU,sighandler);
@@ -235,7 +240,7 @@ static int parseargs (int ac, char **av)
 			showversion = 1;
 			break;
 		case 'N':
-			set_log_file(boptarg); 
+			set_log_file(boptarg);
 			break;
 		case '?':
 		default:
@@ -265,6 +270,142 @@ static int parseargs (int ac, char **av)
 	return 0;
 }
 
+/* get problem name */
+static void derive_problem_name (const char *path, char *out, size_t outsz)
+{
+	const char *base = strrchr (path, '/');
+	base = base ? base + 1 : path;
+	snprintf (out, outsz, "%s", base);
+	size_t n = strlen (out);
+	if (n > 3 && strcmp (out + n - 3, ".gz") == 0)        { out[n-3] = 0; n -= 3; }
+	else if (n > 4 && strcmp (out + n - 4, ".bz2") == 0)  { out[n-4] = 0; n -= 4; }
+	char *dot = strrchr (out, '.');
+	if (dot) *dot = 0;
+}
+
+// write the sparse matrix in the sparse triplet form
+static int write_sparse_mpq_matrix (const char *path, int nrows, int ncols,
+		const mpq_t *matval, const int *matbeg, const int *matcnt, const int *matind)
+{
+	EGioFile_t *f = EGioOpen (path, "w");
+	if (!f) {
+		fprintf (stderr, "could not open %s for writing\n", path);
+		return 1;
+	}
+	int nnz = 0;
+	for (int j = 0; j < ncols; ++j) nnz += matcnt[j];
+	EGioPrintf (f, "%d %d %d\n", nrows, ncols, nnz);
+	char numbuf[8192];
+	for (int j = 0; j < ncols; ++j) {
+		int beg = matbeg[j];
+		int cnt = matcnt[j];
+		for (int k = 0; k < cnt; ++k) {
+			int row = matind[beg + k];
+			gmp_snprintf (numbuf, sizeof (numbuf), "%Qd", matval[beg + k]);
+			EGioPrintf (f, "%d %d %s\n", row, j, numbuf);
+		}
+	}
+	EGioClose (f);
+	return 0;
+}
+
+// dump a single basis, rebuild from A
+static int dump_one_basis (const char *dir, int k, int nrows_qs,
+		const int *baz, mpq_ILLlpdata *qslp)
+{
+	char path[2048];
+	/* B matrix: nrows x nrows, columns gathered from qslp->A in the order
+	 * given by baz.  We set column j of B as A.column[baz[j]] */
+	snprintf (path, sizeof (path), "%s/basis_k%d_B.txt", dir, k);
+	EGioFile_t *f = EGioOpen (path, "w");
+	if (!f) return 1;
+	int nnz = 0;
+	for (int j = 0; j < nrows_qs; ++j) nnz += qslp->A.matcnt[baz[j]];
+	EGioPrintf (f, "%d %d %d\n", nrows_qs, nrows_qs, nnz);
+	char numbuf[8192];
+	for (int j = 0; j < nrows_qs; ++j) {
+		int col = baz[j];
+		int beg = qslp->A.matbeg[col];
+		int cnt = qslp->A.matcnt[col];
+		for (int k2 = 0; k2 < cnt; ++k2) {
+			int row = qslp->A.matind[beg + k2];
+			gmp_snprintf (numbuf, sizeof (numbuf), "%Qd", qslp->A.matval[beg + k2]);
+			EGioPrintf (f, "%d %d %s\n", row, j, numbuf);
+		}
+	}
+	EGioClose (f);
+	return 0;
+}
+
+/* create the directory <problem>_Bases in the cwd and dump the constraint
+ * matrix A and the last k basis matrices in there
+ */
+static void dump_basis_snapshots (mpq_QSdata *p_mpq, const char *input_fname)
+{
+	// make sure that we have at least one snapshot
+	int n = basis_snapshot_count();
+	if (n <= 0) {
+		fprintf (stderr, "no basis snapshots captured; nothing to dump\n");
+		return;
+	}
+
+
+	if (!p_mpq || !p_mpq->qslp) return;
+	mpq_ILLlpdata *qslp = p_mpq->qslp;
+
+	char prob[1024];
+	derive_problem_name (input_fname, prob, sizeof (prob));
+	char dir[2048];
+	snprintf (dir, sizeof (dir), "%s_Bases", prob);
+
+	if (mkdir (dir, 0755) != 0 && errno != EEXIST) {
+		fprintf (stderr, "could not create directory %s: %s\n",
+				dir, strerror (errno));
+		return;
+	}
+
+	// meta.txt
+	{
+		char path[2048];
+		snprintf (path, sizeof (path), "%s/meta.txt", dir);
+		EGioFile_t *f = EGioOpen (path, "w");
+		if (f) {
+			EGioPrintf (f, "problem: %s\n", prob);
+			EGioPrintf (f, "source_file: %s\n", input_fname);
+			EGioPrintf (f, "nrows: %d\n", qslp->nrows);
+			EGioPrintf (f, "ncols_total: %d\n",
+					qslp->A.matcols);
+			EGioPrintf (f, "nstruct: %d\n", qslp->nstruct);
+			EGioPrintf (f, "snapshots_captured: %d\n", n);
+			EGioClose (f);
+		}
+	}
+
+	// write the constraint matrix A to <Problem>_Bases
+	{
+		char path[2048];
+		snprintf (path, sizeof (path), "%s/A.txt", dir);
+		write_sparse_mpq_matrix (path, qslp->A.matrows, qslp->A.matcols,
+				qslp->A.matval, qslp->A.matbeg, qslp->A.matcnt, qslp->A.matind);
+	}
+
+	// dump each basis that's in the ring buffer
+	for (int k = 0; k < n; ++k) {
+		int nrows_snap = 0;
+		const int *baz = NULL;
+		if (basis_snapshot_get (k, &nrows_snap, &baz) != 0) continue;
+		if (nrows_snap != qslp->nrows) {
+			fprintf (stderr,
+				"basis snapshot k=%d has nrows=%d but qslp->nrows=%d; skipping\n",
+				k, nrows_snap, qslp->nrows);
+			continue;
+		}
+		dump_one_basis (dir, k, nrows_snap, baz, qslp);
+	}
+
+	fprintf (stderr, "wrote %d basis snapshot(s) + A to %s/\n", n, dir);
+}
+
 /* ========================================================================= */
 /** @brief the main thing! */
 /* ========================================================================= */
@@ -282,7 +423,7 @@ int main (int ac, char **av)
 	mpq_t *y_mpq = 0,
 	*x_mpq = 0;
 	QSopt_ex_version();
-	QSexactStart(); // AP: function in exact.c, calls EGlpNumStart in eg_lpnum.c 
+	QSexactStart(); // AP: function in exact.c, calls EGlpNumStart in eg_lpnum.c
 
 	/* parse arguments and initialize EGlpNum related things */
 	rval = parseargs (ac, av);
@@ -326,7 +467,7 @@ int main (int ac, char **av)
 
 	// adds section header after fname is defined
 	log_session_header(fname);
-	
+
 	/* read the mpq problem */
 	ILLutil_init_timer (&timer_read, "SOLVER_READ_MPQ");
 	ILLutil_start_timer (&timer_read);
@@ -374,9 +515,11 @@ int main (int ac, char **av)
 	}
 	ILLutil_init_timer (&timer_solve, "SOLVER");
 	ILLutil_start_timer (&timer_solve);
+	basis_snapshot_init (p_mpq->qslp->nrows);
 	rval = QSexact_solver (p_mpq, x_mpq, y_mpq, basis, simplexalgo, &status);
 	ILL_CLEANUP_IF (rval);
 	ILLutil_stop_timer (&timer_solve, 1);
+	dump_basis_snapshots (p_mpq, fname);
 	if (printsol)
 	{
 		char out_f_name[1024];

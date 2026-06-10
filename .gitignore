@@ -57,7 +57,11 @@ Makefile.in
 /config.sub
 
 # Problems
-Problems/
+Problems/*
+!Problems/cycle.mps
+
+# Basis snapshot output directories from esolver runs
+*_Bases/
 
 # Out-of-source build directory
 /build/
