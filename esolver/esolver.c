@@ -309,6 +309,24 @@ static int write_sparse_mpq_matrix (const char *path, int nrows, int ncols,
 	return 0;
 }
 
+// write the rhs vector b
+static int write_dense_mpq_vector (const char *path, int n, const mpq_t *vec)
+{
+	EGioFile_t *f = EGioOpen (path, "w");
+	if (!f) {
+		fprintf (stderr, "could not open %s for writing\n", path);
+		return 1;
+	}
+	EGioPrintf (f, "%d\n", n);
+	char numbuf[8192];
+	for (int i = 0; i < n; ++i) {
+		gmp_snprintf (numbuf, sizeof (numbuf), "%Qd", vec[i]);
+		EGioPrintf (f, "%s\n", numbuf);
+	}
+	EGioClose (f);
+	return 0;
+}
+
 // dump a single basis, rebuild from A
 static int dump_one_basis (const char *dir, int k, int nrows_qs,
 		const int *baz, mpq_ILLlpdata *qslp)
@@ -344,6 +362,7 @@ static void dump_basis_snapshots (mpq_QSdata *p_mpq, const char *input_fname)
 {
 	// make sure that we have at least one snapshot
 	int n = basis_snapshot_count();
+	int total_snaps = get_num_snapshots();
 	if (n <= 0) {
 		fprintf (stderr, "no basis snapshots captured; nothing to dump\n");
 		return;
@@ -376,7 +395,7 @@ static void dump_basis_snapshots (mpq_QSdata *p_mpq, const char *input_fname)
 			EGioPrintf (f, "ncols_total: %d\n",
 					qslp->A.matcols);
 			EGioPrintf (f, "nstruct: %d\n", qslp->nstruct);
-			EGioPrintf (f, "snapshots_captured: %d\n", n);
+			EGioPrintf (f, "total_snapshots_captured: %d\n", total_snaps);
 			EGioClose (f);
 		}
 	}
@@ -387,6 +406,13 @@ static void dump_basis_snapshots (mpq_QSdata *p_mpq, const char *input_fname)
 		snprintf (path, sizeof (path), "%s/A.txt", dir);
 		write_sparse_mpq_matrix (path, qslp->A.matrows, qslp->A.matcols,
 				qslp->A.matval, qslp->A.matbeg, qslp->A.matcnt, qslp->A.matind);
+	}
+
+	// write the rhs vector b into b.txt
+	{
+		char path[2048];
+		snprintf (path, sizeof (path), "%s/b.txt", dir);
+		write_dense_mpq_vector (path, qslp->nrows, qslp->rhs);
 	}
 
 	// dump each basis that's in the ring buffer

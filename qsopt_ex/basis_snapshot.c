@@ -15,6 +15,7 @@ static int  nrows_cur = 0;
 // this is where the next write will gos
 static int  ring_head = 0;
 static int  ring_count = 0;
+static int snapshots_captured = 0;
 
 void basis_snapshot_init(int nrows)
 {
@@ -50,6 +51,7 @@ void basis_snapshot_push(const int *baz)
 	memcpy(slot, baz, sizeof(int) * nrows_cur);
 
 	ring_head = (ring_head + 1) % BASIS_SNAPSHOT_CAPACITY;
+	snapshots_captured += 1;
 	if (ring_count < BASIS_SNAPSHOT_CAPACITY) ring_count++;
 }
 
@@ -69,4 +71,8 @@ int basis_snapshot_get(int k, int *nrows_out, const int **baz_out)
 	if (nrows_out) *nrows_out = nrows_cur;
 	if (baz_out)   *baz_out   = storage + idx * nrows_cur;
 	return 0;
+}
+
+int get_num_snapshots(void) {
+	return snapshots_captured;
 }

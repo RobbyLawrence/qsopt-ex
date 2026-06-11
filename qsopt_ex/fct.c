@@ -662,12 +662,12 @@ void EGLPNUM_TYPENAME_ILLfct_update_basis_info (
 		lp->baz[lindex] = evar;
 		lp->nbaz[eindex] = lvar;
 		(lp->basisid)++;
-		basis_snapshot_push (lp->baz);
 	}
 	else
 	{
 		lp->vstat[evar] = (lp->vstat[evar] == STAT_LOWER) ? STAT_UPPER : STAT_LOWER;
 	}
+	basis_snapshot_push (lp->baz);
 }
 
 void EGLPNUM_TYPENAME_ILLfct_update_xz (

@@ -18,4 +18,7 @@ int  basis_snapshot_count(void);
 // k = 0 is the most recently retained snapshot
 int  basis_snapshot_get(int k, int *nrows_out, const int **baz_out);
 
+// return the total number of snapshots taken
+int get_num_snapshots(void);
+
 #endif
