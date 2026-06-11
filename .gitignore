@@ -70,3 +70,7 @@ Problems/*
 compile_commands.json
 .clangd
 .cache/
+
+config.*
+
+install-sh~
