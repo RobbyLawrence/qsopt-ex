@@ -40,6 +40,7 @@
 #include "qs_config.h"
 #include "timing_log.h"
 #include "basis_snapshot.h"
+#include "factor_mpq.h"
 
 /* ========================================================================= */
 /** @name static parameters for the main program */
@@ -384,14 +385,57 @@ static int write_dense_mpq_vector (const char *path, int n, const mpq_t *vec)
 	return 0;
 }
 
-/* Dump a single basis matrix B, integer-scaled row-wise.
- *
- * B is nrows_qs x nrows_qs; column j of B is the column baz[j] of qslp->A,
- * with rows preserved.  Output file format matches write_sparse_mpq_matrix:
- *   nrows ncols nnz
- *   L_0 ... L_{nrows-1}        (one per line; row-wise denominator LCM over B)
- *   row col int_val            (repeated nnz times)
- */
+/* Exact-arithmetic validation of one snapshot: factor B = A(:, baz) with
+ * the library's own rational LU (mpq_ILLfactor).  A float simplex run can
+ * pivot through EXACTLY singular bases without noticing -- its pivot
+ * tolerances hide the dependency (e.g. two basic variables whose A columns
+ * are identical), and the run is later abandoned for a higher precision
+ * anyway -- so the pivot-trail tail is not automatically usable as test
+ * data.  Returns 1 iff the basis is exactly nonsingular. */
+static int snapshot_exactly_nonsingular (mpq_ILLlpdata *qslp, const int *baz)
+{
+	int rval = 0, ok = 0;
+	int nsing = 0, *singr = 0, *singc = 0;
+	int nrows = qslp->nrows;
+	int *bcopy = 0;
+	mpq_factor_work f;
+
+	memset (&f, 0, sizeof (f));
+	mpq_EGlpNumInitVar (f.fzero_tol);
+	mpq_EGlpNumInitVar (f.szero_tol);
+	mpq_EGlpNumInitVar (f.partial_tol);
+	mpq_EGlpNumInitVar (f.maxelem_orig);
+	mpq_EGlpNumInitVar (f.maxelem_factor);
+	mpq_EGlpNumInitVar (f.maxelem_cur);
+	mpq_EGlpNumInitVar (f.partial_cur);
+	mpq_ILLfactor_init_factor_work (&f);
+	rval = mpq_ILLfactor_create_factor_work (&f, nrows);
+	if (rval) goto CLEANUP;
+
+	// ILLfactor takes a non-const basis; keep the ring slot pristine
+	ILL_SAFE_MALLOC (bcopy, nrows, int);
+	memcpy (bcopy, baz, sizeof (int) * nrows);
+
+	rval = mpq_ILLfactor (&f, bcopy, qslp->A.matbeg, qslp->A.matcnt,
+			qslp->A.matind, qslp->A.matval, &nsing, &singr, &singc);
+	ok = (rval == 0 && nsing == 0);
+
+CLEANUP:
+	ILL_IFFREE (singr);
+	ILL_IFFREE (singc);
+	ILL_IFFREE (bcopy);
+	mpq_ILLfactor_free_factor_work (&f);
+	mpq_EGlpNumClearVar (f.fzero_tol);
+	mpq_EGlpNumClearVar (f.szero_tol);
+	mpq_EGlpNumClearVar (f.partial_tol);
+	mpq_EGlpNumClearVar (f.maxelem_orig);
+	mpq_EGlpNumClearVar (f.maxelem_factor);
+	mpq_EGlpNumClearVar (f.maxelem_cur);
+	mpq_EGlpNumClearVar (f.partial_cur);
+	return ok;
+}
+
+// dump a single basis, rebuild from A
 static int dump_one_basis (const char *dir, int k, int nrows_qs,
 		const int *baz, mpq_ILLlpdata *qslp)
 {
@@ -509,8 +553,14 @@ static void dump_basis_snapshots (mpq_QSdata *p_mpq, const char *input_fname)
 		write_dense_mpq_vector (path, qslp->nrows, qslp->rhs);
 	}
 
-	// dump each basis that's in the ring buffer
-	for (int k = 0; k < n; ++k) {
+	/* dump the most recent NDUMP exactly-nonsingular bases from the ring.
+	 * Candidates that fail the exact factorization are skipped with a
+	 * note: the tail of a float run's pivot trail can be exactly singular
+	 * (that is typically WHY the solver escalated precision), and dumping
+	 * those would just make the downstream factorization demos fall over. */
+	#define NDUMP 5
+	int nvalid = 0, nskipped = 0;
+	for (int k = 0; k < n && nvalid < NDUMP; ++k) {
 		int nrows_snap = 0;
 		const int *baz = NULL;
 		if (basis_snapshot_get (k, &nrows_snap, &baz) != 0) continue;
@@ -520,10 +570,43 @@ static void dump_basis_snapshots (mpq_QSdata *p_mpq, const char *input_fname)
 				k, nrows_snap, qslp->nrows);
 			continue;
 		}
-		dump_one_basis (dir, k, nrows_snap, baz, qslp);
+		if (!snapshot_exactly_nonsingular (qslp, baz)) {
+			nskipped++;
+			continue;
+		}
+		dump_one_basis (dir, nvalid, nrows_snap, baz, qslp);
+		nvalid++;
 	}
 
-	fprintf (stderr, "wrote %d basis snapshot(s) + A to %s/\n", n, dir);
+	// remove stale basis files from earlier runs beyond what we just wrote
+	for (int k = nvalid; k < BASIS_SNAPSHOT_CAPACITY; ++k) {
+		char path[2048];
+		snprintf (path, sizeof (path), "%s/basis_k%d_B.txt", dir, k);
+		remove (path);
+	}
+
+	// record the validation outcome next to the data
+	{
+		char path[2048];
+		snprintf (path, sizeof (path), "%s/meta.txt", dir);
+		EGioFile_t *f = EGioOpen (path, "a");
+		if (f) {
+			EGioPrintf (f, "ring_candidates: %d\n", n);
+			EGioPrintf (f, "exactly_singular_skipped: %d\n", nskipped);
+			EGioPrintf (f, "valid_bases_dumped: %d\n", nvalid);
+			EGioClose (f);
+		}
+	}
+
+	fprintf (stderr, "wrote %d exactly-nonsingular basis snapshot(s) + A to "
+			"%s/ (%d of %d ring candidates were exactly singular and were "
+			"skipped)\n", nvalid, dir, nskipped, n);
+	if (nvalid < NDUMP) {
+		fprintf (stderr, "note: fewer than %d valid bases existed in the "
+				"last %d pivots; the float trajectory was exactly singular "
+				"for the rest\n", NDUMP, n);
+	}
+	#undef NDUMP
 }
 
 /* ========================================================================= */

@@ -662,12 +662,14 @@ void EGLPNUM_TYPENAME_ILLfct_update_basis_info (
 		lp->baz[lindex] = evar;
 		lp->nbaz[eindex] = lvar;
 		(lp->basisid)++;
+		/* snapshot only real basis changes; a bound flip (lindex < 0)
+		 * leaves baz untouched and would just duplicate the last slot */
+		basis_snapshot_push (lp->baz);
 	}
 	else
 	{
 		lp->vstat[evar] = (lp->vstat[evar] == STAT_LOWER) ? STAT_UPPER : STAT_LOWER;
 	}
-	basis_snapshot_push (lp->baz);
 }
 
 void EGLPNUM_TYPENAME_ILLfct_update_xz (

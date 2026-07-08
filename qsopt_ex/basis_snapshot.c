@@ -4,6 +4,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "basis_snapshot.h"
 
@@ -49,6 +50,27 @@ void basis_snapshot_push(const int *baz)
 
 	int *slot = storage + ring_head * nrows_cur;
 	memcpy(slot, baz, sizeof(int) * nrows_cur);
+
+#ifdef BASIS_SNAPSHOT_DEBUG
+	{
+		static int *seen = NULL;
+		static int seen_sz = 0;
+		int dups = 0, mx = 0;
+		for (int i = 0; i < nrows_cur; i++) {
+			if (baz[i] > mx) mx = baz[i];
+		}
+		if (seen_sz < mx + 1) {
+			seen = (int *) realloc(seen, sizeof(int) * (mx + 1));
+			seen_sz = mx + 1;
+		}
+		memset(seen, 0, sizeof(int) * seen_sz);
+		for (int i = 0; i < nrows_cur; i++) {
+			if (baz[i] >= 0 && seen[baz[i]]++) dups++;
+		}
+		fprintf(stderr, "[snap] push=%d dups=%d baz[0..3]=%d,%d,%d,%d\n",
+			snapshots_captured + 1, dups, baz[0], baz[1], baz[2], baz[3]);
+	}
+#endif
 
 	ring_head = (ring_head + 1) % BASIS_SNAPSHOT_CAPACITY;
 	snapshots_captured += 1;

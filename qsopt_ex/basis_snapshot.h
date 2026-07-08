@@ -4,7 +4,13 @@
 #ifndef QS_BASIS_SNAPSHOT_H
 #define QS_BASIS_SNAPSHOT_H
 
-#define BASIS_SNAPSHOT_CAPACITY 5
+/* Ring capacity.  Deliberately larger than the number of bases dumped (5):
+ * the dump step validates each candidate in EXACT arithmetic and skips
+ * bases that are exactly singular -- a float simplex run can pivot through
+ * exactly-singular bases without noticing (its tolerances hide the
+ * dependency), so the tail of the pivot trail is not automatically usable
+ * -- and the extra slots give the dump more candidates to fall back on. */
+#define BASIS_SNAPSHOT_CAPACITY 64
 
 // allocate the ring's storage for an LP with m rows; safe to call again
 // for a new problem (resizes if m changed)
