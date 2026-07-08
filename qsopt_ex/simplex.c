@@ -1110,16 +1110,18 @@ START:
 LIMIT_TERMINATE:
 	// AP: save time to file
 	EGioFile_t *out = 0;
-	out = EGioOpen ("time_precision_data", "a");
-	EGioPrintf (out, "%s %.3f: %f, %f, %f, %f\n", lp->O->probname, ILLutil_zeit () - lp->starttime, (double) lp->cnts->pI_iter / (double) lp->cnts->tot_iter,
-		(double) lp->cnts->pII_iter / (double) lp->cnts->tot_iter, (double) lp->cnts->dI_iter / (double) lp->cnts->tot_iter,
-		(double) lp->cnts->dII_iter / (double) lp->cnts->tot_iter);
-	EGioClose (out);
+	if (timing_enabled) {
+		out = EGioOpen ("time_precision_data", "a");
+		EGioPrintf (out, "%s %.3f: %f, %f, %f, %f\n", lp->O->probname, ILLutil_zeit () - lp->starttime, (double) lp->cnts->pI_iter / (double) lp->cnts->tot_iter,
+			(double) lp->cnts->pII_iter / (double) lp->cnts->tot_iter, (double) lp->cnts->dI_iter / (double) lp->cnts->tot_iter,
+			(double) lp->cnts->dII_iter / (double) lp->cnts->tot_iter);
+		EGioClose (out);
 
-	// AP: tester code for basis/scaling understanding
-	out = EGioOpen ("basis_scaling", "a");
-	EGioPrintf (out, "%s\n", lp->O->probname);
-	EGioClose (out);
+		// AP: tester code for basis/scaling understanding
+		out = EGioOpen ("basis_scaling", "a");
+		EGioPrintf (out, "%s\n", lp->O->probname);
+		EGioClose (out);
+	}
 
 	rval = terminate_simplex (lp, phase, &it);
 	CHECKRVALG (rval, CLEANUP);
@@ -1127,7 +1129,7 @@ LIMIT_TERMINATE:
 TERMINATE:
 	// AP: save time to file
 	// EGioFile_t *out = 0;
-	if (!rval) {
+	if (!rval && timing_enabled) {
 		out = EGioOpen ("time_precision_data", "a");
 		EGioPrintf (out, "%s %.3f: %f, %f, %f, %f\n", lp->O->probname, ILLutil_zeit () - lp->starttime, (double) lp->cnts->pI_iter / (double) lp->cnts->tot_iter,
 			(double) lp->cnts->pII_iter / (double) lp->cnts->tot_iter, (double) lp->cnts->dI_iter / (double) lp->cnts->tot_iter,

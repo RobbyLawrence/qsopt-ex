@@ -6,6 +6,13 @@
 // global log filename
 char log_filename[256] = "qsopt_timing.log";
 
+// timing output is disabled unless explicitly enabled via the -T flag
+int timing_enabled = 0;
+
+void set_timing_enabled(int enabled) {
+    timing_enabled = enabled ? 1 : 0;
+}
+
 // sets the log filename based on problem name
 void set_log_file(const char *problem_name) {
     snprintf(log_filename, sizeof(log_filename), "%s.log", problem_name);
@@ -13,6 +20,7 @@ void set_log_file(const char *problem_name) {
 
 // creates the log file
 void log_timing(const char *label, double seconds) {
+    if (!timing_enabled) return;
     FILE *fp = fopen(log_filename, "a");
     if (fp) {
         time_t now = time(NULL);
@@ -25,6 +33,7 @@ void log_timing(const char *label, double seconds) {
 
 // general log line writer
 void log_message(const char *format, ...) {
+    if (!timing_enabled) return;
     FILE *fp = fopen(log_filename, "a");
     if (fp) {
         va_list args;
@@ -38,6 +47,7 @@ void log_message(const char *format, ...) {
 
 // session header
 void log_session_header(const char *label) {
+    if (!timing_enabled) return;
     FILE *fp = fopen(log_filename, "a");
     if (fp) {
         time_t now = time(NULL);
@@ -54,6 +64,7 @@ void log_session_header(const char *label) {
 
 // session footer
 void log_session_footer(const char *label) {
+    if (!timing_enabled) return;
     FILE *fp = fopen(log_filename, "a");
     if (fp) {
         time_t now = time(NULL);

@@ -88,6 +88,7 @@ static void usage (char *s)
 					 QS_PRICE_DDANTZIG, QS_PRICE_DSTEEP, QS_PRICE_DMULTPARTIAL,
 					 QS_PRICE_DDEVEX);
 	fprintf (stderr, "   -S    do NOT scale the initial LP\n");
+	fprintf (stderr, "   -T    enable timing output (qsopt_timing.log, time_precision_data, basis_scaling)\n");
 	fprintf (stderr, "   -v    print QSopt version number\n");
 	fprintf (stderr, "   -R n  maximum running time allowed, default %lf\n",
 						max_rtime);
@@ -200,7 +201,7 @@ static int parseargs (int ac, char **av)
 	int boptind = 1;
 	char *boptarg = 0;
 
-	while ((c = ILLutil_bix_getopt (ac, av, "b:B:d:EILm:O:p:P:R:SvN:", &boptind, &boptarg)) != EOF)
+	while ((c = ILLutil_bix_getopt (ac, av, "b:B:d:EILm:O:p:P:R:STvN:", &boptind, &boptarg)) != EOF)
 		switch (c)
 		{
 		case 'm':
@@ -235,6 +236,9 @@ static int parseargs (int ac, char **av)
 			break;
 		case 'S':
 			usescaling = 0;
+			break;
+		case 'T':
+			set_timing_enabled(1);
 			break;
 		case 'v':
 			showversion = 1;
@@ -283,7 +287,20 @@ static void derive_problem_name (const char *path, char *out, size_t outsz)
 	if (dot) *dot = 0;
 }
 
-// write the sparse matrix in the sparse triplet form
+/* Write a sparse rational matrix as an integer-scaled matrix in triplet form.
+ *
+ * Each row i is scaled by L_i = lcm of the denominators of its nonzero
+ * entries, so every stored value becomes the integer num * (L_i / den).
+ * The original entry can be recovered as int_val / L_i.
+ *
+ * File format:
+ *   nrows ncols nnz
+ *   L_0
+ *   L_1
+ *   ...
+ *   L_{nrows-1}
+ *   row col int_val            (repeated nnz times)
+ */
 static int write_sparse_mpq_matrix (const char *path, int nrows, int ncols,
 		const mpq_t *matval, const int *matbeg, const int *matcnt, const int *matind)
 {
@@ -294,22 +311,61 @@ static int write_sparse_mpq_matrix (const char *path, int nrows, int ncols,
 	}
 	int nnz = 0;
 	for (int j = 0; j < ncols; ++j) nnz += matcnt[j];
-	EGioPrintf (f, "%d %d %d\n", nrows, ncols, nnz);
-	char numbuf[8192];
+
+	mpz_t *L = malloc ((size_t)nrows * sizeof (mpz_t));
+	for (int i = 0; i < nrows; ++i) mpz_init_set_ui (L[i], 1UL);
 	for (int j = 0; j < ncols; ++j) {
-		int beg = matbeg[j];
-		int cnt = matcnt[j];
+		int beg = matbeg[j], cnt = matcnt[j];
 		for (int k = 0; k < cnt; ++k) {
 			int row = matind[beg + k];
-			gmp_snprintf (numbuf, sizeof (numbuf), "%Qd", matval[beg + k]);
+			const mpq_t *v = &matval[beg + k];
+			if (mpz_sgn (mpq_numref (*v)) == 0) continue;
+			mpz_lcm (L[row], L[row], mpq_denref (*v));
+		}
+	}
+
+	EGioPrintf (f, "%d %d %d\n", nrows, ncols, nnz);
+	char numbuf[8192];
+	for (int i = 0; i < nrows; ++i) {
+		gmp_snprintf (numbuf, sizeof (numbuf), "%Zd", L[i]);
+		EGioPrintf (f, "%s\n", numbuf);
+	}
+
+	mpz_t scaled;
+	mpz_init (scaled);
+	for (int j = 0; j < ncols; ++j) {
+		int beg = matbeg[j], cnt = matcnt[j];
+		for (int k = 0; k < cnt; ++k) {
+			int row = matind[beg + k];
+			const mpq_t *v = &matval[beg + k];
+			if (mpz_sgn (mpq_numref (*v)) == 0) {
+				EGioPrintf (f, "%d %d 0\n", row, j);
+				continue;
+			}
+			mpz_divexact (scaled, L[row], mpq_denref (*v));
+			mpz_mul (scaled, scaled, mpq_numref (*v));
+			gmp_snprintf (numbuf, sizeof (numbuf), "%Zd", scaled);
 			EGioPrintf (f, "%d %d %s\n", row, j, numbuf);
 		}
 	}
+	mpz_clear (scaled);
+
+	for (int i = 0; i < nrows; ++i) mpz_clear (L[i]);
+	free (L);
 	EGioClose (f);
 	return 0;
 }
 
-// write the rhs vector b
+/* Write a dense rational vector as integer-scaled values, one per entry.
+ *
+ * File format:
+ *   n
+ *   L_0 int_val_0
+ *   L_1 int_val_1
+ *   ...
+ * where the original entry is int_val_i / L_i.  L_i is just the denominator
+ * of the canonical mpq_t (since each entry is scaled independently).
+ */
 static int write_dense_mpq_vector (const char *path, int n, const mpq_t *vec)
 {
 	EGioFile_t *f = EGioOpen (path, "w");
@@ -318,39 +374,77 @@ static int write_dense_mpq_vector (const char *path, int n, const mpq_t *vec)
 		return 1;
 	}
 	EGioPrintf (f, "%d\n", n);
-	char numbuf[8192];
+	char dbuf[8192], nbuf[8192];
 	for (int i = 0; i < n; ++i) {
-		gmp_snprintf (numbuf, sizeof (numbuf), "%Qd", vec[i]);
-		EGioPrintf (f, "%s\n", numbuf);
+		gmp_snprintf (dbuf, sizeof (dbuf), "%Zd", mpq_denref (vec[i]));
+		gmp_snprintf (nbuf, sizeof (nbuf), "%Zd", mpq_numref (vec[i]));
+		EGioPrintf (f, "%s %s\n", dbuf, nbuf);
 	}
 	EGioClose (f);
 	return 0;
 }
 
-// dump a single basis, rebuild from A
+/* Dump a single basis matrix B, integer-scaled row-wise.
+ *
+ * B is nrows_qs x nrows_qs; column j of B is the column baz[j] of qslp->A,
+ * with rows preserved.  Output file format matches write_sparse_mpq_matrix:
+ *   nrows ncols nnz
+ *   L_0 ... L_{nrows-1}        (one per line; row-wise denominator LCM over B)
+ *   row col int_val            (repeated nnz times)
+ */
 static int dump_one_basis (const char *dir, int k, int nrows_qs,
 		const int *baz, mpq_ILLlpdata *qslp)
 {
 	char path[2048];
-	/* B matrix: nrows x nrows, columns gathered from qslp->A in the order
-	 * given by baz.  We set column j of B as A.column[baz[j]] */
 	snprintf (path, sizeof (path), "%s/basis_k%d_B.txt", dir, k);
 	EGioFile_t *f = EGioOpen (path, "w");
 	if (!f) return 1;
+
 	int nnz = 0;
 	for (int j = 0; j < nrows_qs; ++j) nnz += qslp->A.matcnt[baz[j]];
-	EGioPrintf (f, "%d %d %d\n", nrows_qs, nrows_qs, nnz);
-	char numbuf[8192];
+
+	mpz_t *L = malloc ((size_t)nrows_qs * sizeof (mpz_t));
+	for (int i = 0; i < nrows_qs; ++i) mpz_init_set_ui (L[i], 1UL);
 	for (int j = 0; j < nrows_qs; ++j) {
 		int col = baz[j];
-		int beg = qslp->A.matbeg[col];
-		int cnt = qslp->A.matcnt[col];
+		int beg = qslp->A.matbeg[col], cnt = qslp->A.matcnt[col];
 		for (int k2 = 0; k2 < cnt; ++k2) {
 			int row = qslp->A.matind[beg + k2];
-			gmp_snprintf (numbuf, sizeof (numbuf), "%Qd", qslp->A.matval[beg + k2]);
+			const mpq_t *v = &qslp->A.matval[beg + k2];
+			if (mpz_sgn (mpq_numref (*v)) == 0) continue;
+			mpz_lcm (L[row], L[row], mpq_denref (*v));
+		}
+	}
+
+	EGioPrintf (f, "%d %d %d\n", nrows_qs, nrows_qs, nnz);
+	char numbuf[8192];
+	for (int i = 0; i < nrows_qs; ++i) {
+		gmp_snprintf (numbuf, sizeof (numbuf), "%Zd", L[i]);
+		EGioPrintf (f, "%s\n", numbuf);
+	}
+
+	mpz_t scaled;
+	mpz_init (scaled);
+	for (int j = 0; j < nrows_qs; ++j) {
+		int col = baz[j];
+		int beg = qslp->A.matbeg[col], cnt = qslp->A.matcnt[col];
+		for (int k2 = 0; k2 < cnt; ++k2) {
+			int row = qslp->A.matind[beg + k2];
+			const mpq_t *v = &qslp->A.matval[beg + k2];
+			if (mpz_sgn (mpq_numref (*v)) == 0) {
+				EGioPrintf (f, "%d %d 0\n", row, j);
+				continue;
+			}
+			mpz_divexact (scaled, L[row], mpq_denref (*v));
+			mpz_mul (scaled, scaled, mpq_numref (*v));
+			gmp_snprintf (numbuf, sizeof (numbuf), "%Zd", scaled);
 			EGioPrintf (f, "%d %d %s\n", row, j, numbuf);
 		}
 	}
+	mpz_clear (scaled);
+
+	for (int i = 0; i < nrows_qs; ++i) mpz_clear (L[i]);
+	free (L);
 	EGioClose (f);
 	return 0;
 }
@@ -486,10 +580,12 @@ int main (int ac, char **av)
 		get_ftype (fname, &ftype);
 
 	// save file name to data sheet
-	EGioFile_t *out = 0;
-	out = EGioOpen ("time_precision_data", "a");
-	EGioPrintf (out, "%s\n", fname);
-	EGioClose (out);
+	if (timing_enabled) {
+		EGioFile_t *out = 0;
+		out = EGioOpen ("time_precision_data", "a");
+		EGioPrintf (out, "%s\n", fname);
+		EGioClose (out);
+	}
 
 	// adds section header after fname is defined
 	log_session_header(fname);

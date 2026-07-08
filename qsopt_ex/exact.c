@@ -1506,10 +1506,12 @@ int QSexact_solver (mpq_QSdata * p_mpq, mpq_t * const x, mpq_t * const y, QSbasi
 		QSlog("Trying double precision");
 
 		// AP: save double precision to file
-		EGioFile_t *out = 0;
-		out = EGioOpen ("time_precision_data", "a");
-		EGioPrintf (out, "64 ");
-		EGioClose (out);
+		if (timing_enabled) {
+			EGioFile_t *out = 0;
+			out = EGioOpen ("time_precision_data", "a");
+			EGioPrintf (out, "64 ");
+			EGioClose (out);
+		}
 	}
 	p_dbl = QScopy_prob_mpq_dbl (p_mpq, "dbl_problem");
 	if(__QS_SB_VERB <= DEBUG) p_dbl->simplex_display = 1;
@@ -1656,10 +1658,12 @@ int QSexact_solver (mpq_QSdata * p_mpq, mpq_t * const x, mpq_t * const y, QSbasi
 		clock_t mpf_start = clock();
 
 		// AP: save precision to file
-		EGioFile_t *out = 0;
-		out = EGioOpen ("time_precision_data", "a");
-		EGioPrintf (out, "%d ", precision);
-		EGioClose (out);
+		if (timing_enabled) {
+			EGioFile_t *out = 0;
+			out = EGioOpen ("time_precision_data", "a");
+			EGioPrintf (out, "%d ", precision);
+			EGioClose (out);
+		}
 
 		QSexact_set_precision (precision);
 		if (p_mpq->simplex_display || DEBUG >= __QS_SB_VERB)

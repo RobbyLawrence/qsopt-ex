@@ -59,6 +59,8 @@ Makefile.in
 # Problems
 Problems/*
 !Problems/cycle.mps
+!Problems/co9.mps
+!Problems/dano3_3_LP.mps
 
 # Basis snapshot output directories from esolver runs
 *_Bases/
