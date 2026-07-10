@@ -209,8 +209,12 @@ header_DATA = \
 
 
 # Program files
-bin_PROGRAMS = esolver/esolver
+bin_PROGRAMS = esolver/esolver check_violation/check_violation
 noinst_PROGRAMS = tests/test_qs tests/eg_sloan
+
+check_violation_check_violation_SOURCES = check_violation/check_violation.c
+check_violation_check_violation_CFLAGS = $(AM_CFLAGS) $(GMP_CFLAGS)
+check_violation_check_violation_LDADD = $(GMP_LIBS) libqsopt_ex.la
 
 tests_test_qs_SOURCES = tests/test_qs.c
 tests_test_qs_CFLAGS = $(AM_CFLAGS) $(GMP_CFLAGS)
