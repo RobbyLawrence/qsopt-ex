@@ -1,6 +1,6 @@
 Fork Reason
 ===========
-The reason for this for in qsopt_ex is to add a timing function to certain functions. We wish to do this in order to hopefully improve the program. The log will be saved in /qsopt-ex/build/elsover as the file 'qsopt_timing.log'.
+This fork modifies the qsopt_ex to collect snapshots of exactly nonsingular basis matrices collected while performing the simplex algorithm for testing in other applications. We also add the check_violation file to quickly check the optimality/violations that a particular basis might have.
 
 QSopt Exact
 ===========
