@@ -137,7 +137,7 @@ int main(int argc, char **argv)
 
 	/* QSexact_optimal_test returns 1 if (x, y, basis) is a certified optimum,
 	 * 0 otherwise. On failure it prints the violation and magnitude of violation */
-	is_optimal = QSexact_optimal_test(p, x_struct, y_rows, basis);
+	is_optimal = QSexact_optimal_test2(p, x_struct, y_rows, basis);
 
 verdict:
 	printf("\n== Verifier verdict ==\n");

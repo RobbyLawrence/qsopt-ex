@@ -157,7 +157,7 @@ dbl_QSdata *QScopy_prob_mpq_dbl (mpq_QSdata * p, const char *newname)
 {
 	// clock start for timing purposes
         clock_t start = clock();
-	
+
 	const int ncol = mpq_QSget_colcount(p);
 	const int nrow = mpq_QSget_rowcount(p);
 	char*sense=0;
@@ -418,7 +418,7 @@ int QSexact_optimal_test (mpq_QSdata * p,
 	mpq_t *dz = 0;
 	int objsense = (qslp->objsense == QS_MIN) ? 1 : -1;
 	int const msg_lvl = __QS_SB_VERB <= DEBUG ? 0 : 100000 * (1 - p->simplex_display);
-	int rval = 1;									/* store whether or not the solution is optimal, we start 
+	int rval = 1;									/* store whether or not the solution is optimal, we start
 																 * assuming it is. */
 	mpq_t num1,
 	  num2,
@@ -451,7 +451,7 @@ int QSexact_optimal_test (mpq_QSdata * p,
 			if(!msg_lvl)
 			{
 				MESSAGE(0, "variable %s has empty feasible range [%lg,%lg]",
-								 qslp->colnames[i], mpq_EGlpNumToLf(arr3[structmap[i]]), 
+								 qslp->colnames[i], mpq_EGlpNumToLf(arr3[structmap[i]]),
 								 mpq_EGlpNumToLf(arr4[structmap[i]]));
 			}
 			goto CLEANUP;
@@ -489,8 +489,8 @@ int QSexact_optimal_test (mpq_QSdata * p,
 			if(!msg_lvl)
 			{
 				MESSAGE(0, "constraint %s logical has empty feasible range "
-								 "[%lg,%lg]", qslp->rownames[i], 
-								 mpq_EGlpNumToLf(arr3[rowmap[i]]), 
+								 "[%lg,%lg]", qslp->rownames[i],
+								 mpq_EGlpNumToLf(arr3[rowmap[i]]),
 								 mpq_EGlpNumToLf(arr4[rowmap[i]]));
 			}
 			goto CLEANUP;
@@ -573,8 +573,8 @@ int QSexact_optimal_test (mpq_QSdata * p,
 			{
 				MESSAGE(0, "constraint %s artificial (%lg) bellow lower"
 								 " bound (%lg), actual LHS (%lg), actual RHS (%lg)",
-								 qslp->rownames[i], mpq_get_d (num2), 
-								 mpq_get_d (arr2[rowmap[i]]), mpq_get_d (rhs_copy[i]), 
+								 qslp->rownames[i], mpq_get_d (num2),
+								 mpq_get_d (arr2[rowmap[i]]), mpq_get_d (rhs_copy[i]),
 								 mpq_get_d (arr1[i]));
 			}
 			goto CLEANUP;
@@ -594,7 +594,7 @@ int QSexact_optimal_test (mpq_QSdata * p,
 
 	/* compute the upper and lower bound dual variables, note that dl is the dual
 	 * of the lower bounds, and du the dual of the upper bound, dl >= 0 and du <=
-	 * 0 and A^t y + Idl + Idu = c, and the dual objective value is 
+	 * 0 and A^t y + Idl + Idu = c, and the dual objective value is
 	 * max y*b + l*dl + u*du, we colapse both vector dl and du into dz, note that
 	 * if we are maximizing, then dl <= 0 and du >=0 */
 	dz = mpq_EGlpNumAllocArray (qslp->ncols);
@@ -711,8 +711,8 @@ int QSexact_optimal_test (mpq_QSdata * p,
 			if(!msg_lvl)
 			{
 				MESSAGE(0, "lower bound (%s,%d) slack (%lg) and dual variable (%lg)"
-								 " don't satisfy complementary slacknes %s", 
-								 qslp->colnames[col], i, mpq_get_d(num1), mpq_get_d(dz[col]), 
+								 " don't satisfy complementary slacknes %s",
+								 qslp->colnames[col], i, mpq_get_d(num1), mpq_get_d(dz[col]),
 								 "(real)");
 			}
 			goto CLEANUP;
@@ -730,7 +730,7 @@ int QSexact_optimal_test (mpq_QSdata * p,
 			{
 				MESSAGE(0, "upper bound (%lg) variable (%lg) and dual variable"
 								" (%lg) don't satisfy complementary slacknes for variable "
-								"(%s,%d) %s", mpq_get_d(arr4[col]), 
+								"(%s,%d) %s", mpq_get_d(arr4[col]),
 								mpq_get_d(p_sol[i+qslp->nstruct]), mpq_get_d(dz[col]), qslp->colnames[col], i,
 								"(real)");
 			}
@@ -832,6 +832,502 @@ CLEANUP:
 	return rval;
 }
 
+int QSexact_optimal_test2 (mpq_QSdata * p,
+													mpq_t * p_sol,
+													mpq_t * d_sol,
+													QSbasis * basis)
+{
+	// clock start for timing purposes
+        clock_t start = clock();
+
+	/* local variables */
+	register int i,
+	  j;
+	mpq_ILLlpdata *qslp = p->lp->O;
+	int *iarr1 = 0,
+	 *rowmap = qslp->rowmap,
+	 *structmap = qslp->structmap,
+	  col;
+	mpq_t *arr1 = 0,
+	 *arr2 = 0,
+	 *arr3 = 0,
+	 *arr4 = 0,
+	 *rhs_copy = 0;
+	mpq_t *dz = 0;
+	int objsense = (qslp->objsense == QS_MIN) ? 1 : -1;
+	int const msg_lvl = __QS_SB_VERB <= DEBUG ? 0 : 100000 * (1 - p->simplex_display);
+	int rval = 1;									/* store whether or not the solution is optimal, we start
+																 * assuming it is. */
+	mpq_t num1,
+	  num2,
+	  num3,
+	  p_obj,
+	  d_obj;
+
+	/* NEW: Variables to track the largest violation */
+	mpq_t max_violation, current_violation;
+	int worst_type = 0; /* 1: range, 2: infeasible, 3: lower artificial, 4: upper artificial, 5: lower slack, 6: upper slack, 7: obj */
+	int worst_index = -1;
+	char worst_name[256] = "";
+	double val1 = 0.0, val2 = 0.0, val3 = 0.0, val4 = 0.0; /* For logging properties safely later */
+
+	mpq_init (num1);
+	mpq_init (num2);
+	mpq_init (num3);
+	mpq_init (p_obj);
+	mpq_init (d_obj);
+	mpq_set_ui (p_obj, 0UL, 1UL);
+	mpq_set_ui (d_obj, 0UL, 1UL);
+
+	mpq_init (max_violation);
+	mpq_init (current_violation);
+	mpq_set_ui (max_violation, 0UL, 1UL);
+
+	/* now check if the given basis is the optimal basis */
+	arr3 = qslp->lower;
+	arr4 = qslp->upper;
+	if (mpq_QSload_basis (p, basis))
+	{
+		rval = 0;
+		MESSAGE (msg_lvl, "QSload_basis failed");
+		goto CLEANUP;
+	}
+	for (i = basis->nstruct; i--;)
+	{
+		/* check that the upper and lower bound define a non-empty space */
+		if (mpq_cmp (arr3[structmap[i]], arr4[structmap[i]]) > 0)
+		{
+			rval = 0;
+			mpq_sub(current_violation, arr3[structmap[i]], arr4[structmap[i]]);
+			if (mpq_cmp(current_violation, max_violation) > 0)
+			{
+				mpq_set(max_violation, current_violation);
+				worst_type = 1;
+				worst_index = i;
+				strncpy(worst_name, qslp->colnames[i], 255);
+				val1 = mpq_EGlpNumToLf(arr3[structmap[i]]);
+				val2 = mpq_EGlpNumToLf(arr4[structmap[i]]);
+			}
+		}
+		/* set the variable to its apropiate values, depending its status */
+		switch (basis->cstat[i])
+		{
+		case QS_COL_BSTAT_FREE:
+		case QS_COL_BSTAT_BASIC:
+			if (mpq_cmp (p_sol[i], arr4[structmap[i]]) > 0)
+				mpq_set (p_sol[i], arr4[structmap[i]]);
+			else if (mpq_cmp (p_sol[i], arr3[structmap[i]]) < 0)
+				mpq_set (p_sol[i], arr3[structmap[i]]);
+			break;
+		case QS_COL_BSTAT_UPPER:
+			mpq_set (p_sol[i], arr4[structmap[i]]);
+			break;
+		case QS_COL_BSTAT_LOWER:
+			mpq_set (p_sol[i], arr3[structmap[i]]);
+			break;
+		default:
+			rval = 0;
+			MESSAGE (msg_lvl, "Unknown Variable basic status %d, for variable "
+							 "(%s,%d)", basis->cstat[i], qslp->colnames[i], i);
+			goto CLEANUP;
+			break;
+		}
+	}
+	for (i = basis->nrows; i--;)
+	{
+		/* check that the upper and lower bound define a non-empty space */
+		if (mpq_cmp (arr3[rowmap[i]], arr4[rowmap[i]]) > 0)
+		{
+			rval = 0;
+			mpq_sub(current_violation, arr3[rowmap[i]], arr4[rowmap[i]]);
+			if (mpq_cmp(current_violation, max_violation) > 0)
+			{
+				mpq_set(max_violation, current_violation);
+				worst_type = 1; /* reuse range error type */
+				worst_index = i;
+				strncpy(worst_name, qslp->rownames[i], 255);
+				val1 = mpq_EGlpNumToLf(arr3[rowmap[i]]);
+				val2 = mpq_EGlpNumToLf(arr4[rowmap[i]]);
+			}
+		}
+		/* set the variable to its apropiate values, depending its status */
+		switch (basis->rstat[i])
+		{
+		case QS_ROW_BSTAT_BASIC:
+			if (mpq_cmp (p_sol[i + basis->nstruct], arr4[rowmap[i]]) > 0)
+				mpq_set (p_sol[i + basis->nstruct], arr4[rowmap[i]]);
+			else if (mpq_cmp (p_sol[i + basis->nstruct], arr3[rowmap[i]]) < 0)
+				mpq_set (p_sol[i + basis->nstruct], arr3[rowmap[i]]);
+			break;
+		case QS_ROW_BSTAT_UPPER:
+			mpq_set (p_sol[i + basis->nstruct], arr4[rowmap[i]]);
+			break;
+		case QS_ROW_BSTAT_LOWER:
+			mpq_set (p_sol[i + basis->nstruct], arr3[rowmap[i]]);
+			break;
+		default:
+			rval = 0;
+			MESSAGE (msg_lvl, "Unknown Variable basic status %d, for constraint "
+							 "(%s,%d)", basis->cstat[i], qslp->rownames[i], i);
+			goto CLEANUP;
+			break;
+		}
+	}
+
+	/* compute the actual RHS */
+	rhs_copy = mpq_EGlpNumAllocArray (qslp->nrows);
+	for (i = qslp->nstruct; i--;)
+	{
+		if (!mpq_equal (p_sol[i], mpq_zeroLpNum))
+		{
+			arr1 = qslp->A.matval + qslp->A.matbeg[structmap[i]];
+			iarr1 = qslp->A.matind + qslp->A.matbeg[structmap[i]];
+			for (j = qslp->A.matcnt[structmap[i]]; j--;)
+			{
+				mpq_mul (num1, arr1[j], p_sol[i]);
+				mpq_add (rhs_copy[iarr1[j]], rhs_copy[iarr1[j]], num1);
+			}
+		}
+	}
+
+	/* now check if both rhs and copy_rhs are equal */
+	arr4 = qslp->upper;
+	arr1 = qslp->rhs;
+	arr2 = qslp->lower;
+	for (i = qslp->nrows; i--;)
+	{
+		mpq_mul (num1, arr1[i], d_sol[i]);
+		mpq_add (d_obj, d_obj, num1);
+		mpq_sub (num2, arr1[i], rhs_copy[i]);
+		EXIT (qslp->A.matcnt[rowmap[i]] != 1, "Imposible!");
+		if (basis->rstat[i] == QS_ROW_BSTAT_BASIC)
+			mpq_div (p_sol[qslp->nstruct + i], num2,
+							 qslp->A.matval[qslp->A.matbeg[rowmap[i]]]);
+		else
+		{
+			mpq_mul (num1, p_sol[qslp->nstruct + i],
+							 qslp->A.matval[qslp->A.matbeg[rowmap[i]]]);
+			if (!mpq_equal (num1, num2))
+			{
+				rval = 0;
+				mpq_sub(current_violation, num1, num2);
+				mpq_abs(current_violation, current_violation);
+				if (mpq_cmp(current_violation, max_violation) > 0)
+				{
+					mpq_set(max_violation, current_violation);
+					worst_type = 2;
+					worst_index = i;
+					strncpy(worst_name, qslp->rownames[i], 255);
+				}
+			}
+		}
+		mpq_set (num2, p_sol[qslp->nstruct + i]);
+		/* now we check the bounds on the logical variables */
+		if (mpq_cmp (num2, arr2[rowmap[i]]) < 0)
+		{
+			rval = 0;
+			mpq_sub(current_violation, arr2[rowmap[i]], num2);
+			if (mpq_cmp(current_violation, max_violation) > 0)
+			{
+				mpq_set(max_violation, current_violation);
+				worst_type = 3;
+				worst_index = i;
+				strncpy(worst_name, qslp->rownames[i], 255);
+				val1 = mpq_get_d (num2);
+				val2 = mpq_get_d (arr2[rowmap[i]]);
+				val3 = mpq_get_d (rhs_copy[i]);
+				val4 = mpq_get_d (arr1[i]);
+			}
+		}
+		else if (mpq_cmp (num2, arr4[rowmap[i]]) > 0)
+		{
+			rval = 0;
+			mpq_sub(current_violation, num2, arr4[rowmap[i]]);
+			if (mpq_cmp(current_violation, max_violation) > 0)
+			{
+				mpq_set(max_violation, current_violation);
+				worst_type = 4;
+				worst_index = i;
+				strncpy(worst_name, qslp->rownames[i], 255);
+				val1 = mpq_get_d (num2);
+				val2 = mpq_get_d (arr4[rowmap[i]]);
+			}
+		}
+	}
+
+	dz = mpq_EGlpNumAllocArray (qslp->ncols);
+	arr2 = qslp->obj;
+	arr3 = qslp->lower;
+	arr4 = qslp->upper;
+	for (i = qslp->nstruct; i--;)
+	{
+		col = structmap[i];
+		mpq_mul (num1, arr2[col], p_sol[i]);
+		mpq_add (p_obj, p_obj, num1);
+		arr1 = qslp->A.matval + qslp->A.matbeg[col];
+		iarr1 = qslp->A.matind + qslp->A.matbeg[col];
+		mpq_set (num1, arr2[col]);
+		for (j = qslp->A.matcnt[col]; j--;)
+		{
+			mpq_mul (num2, arr1[j], d_sol[iarr1[j]]);
+			mpq_sub (num1, num1, num2);
+		}
+		mpq_set (dz[col], num1);
+		/* objective update */
+		if (objsense * mpq_cmp_ui (dz[col], 0UL, 1UL) > 0)
+		{
+			mpq_mul (num3, dz[col], arr3[col]);
+			mpq_add (d_obj, d_obj, num3);
+		}
+		else
+		{
+			mpq_mul (num3, dz[col], arr4[col]);
+			mpq_add (d_obj, d_obj, num3);
+		}
+		/* complementary slackness checking */
+		mpq_set_ui (num2, 0UL, 1UL);
+		if (objsense * mpq_cmp_ui (dz[col], 0UL, 1UL) > 0)
+		{
+			mpq_sub (num1, p_sol[i], arr3[col]);
+			mpq_mul (num2, num1, dz[col]);
+		}
+		if (mpq_cmp_ui (num2, 0UL, 1UL) != 0)
+		{
+			rval = 0;
+			mpq_abs(current_violation, num2);
+			if (mpq_cmp(current_violation, max_violation) > 0)
+			{
+				mpq_set(max_violation, current_violation);
+				worst_type = 5;
+				worst_index = i;
+				strncpy(worst_name, qslp->colnames[i], 255);
+				val1 = mpq_get_d(num1);
+				val2 = mpq_get_d(dz[col]);
+			}
+		}
+		mpq_set_ui (num2, 0UL, 1UL);
+		if (objsense * mpq_cmp_ui (dz[col], 0UL, 1UL) < 0)
+		{
+			mpq_sub (num1, p_sol[i], arr4[col]);
+			mpq_mul (num2, num1, dz[col]);
+		}
+		if (mpq_cmp_ui (num2, 0UL, 1UL) != 0)
+		{
+			rval = 0;
+			mpq_abs(current_violation, num2);
+			if (mpq_cmp(current_violation, max_violation) > 0)
+			{
+				mpq_set(max_violation, current_violation);
+				worst_type = 6;
+				worst_index = i;
+				strncpy(worst_name, qslp->colnames[i], 255);
+				val1 = mpq_get_d(arr4[col]);
+				val2 = mpq_get_d(p_sol[i]);
+				val3 = mpq_get_d(dz[col]);
+			}
+		}
+	}
+
+	for (i = qslp->nrows; i--;)
+	{
+		col = rowmap[i];
+		mpq_mul (num1, arr2[col], p_sol[i + qslp->nstruct]);
+		WARNING (mpq_cmp (arr2[col], mpq_zeroLpNum), "logical variable %s with "
+						 "non-zero objective function %lf", qslp->rownames[i],
+						 mpq_get_d (arr2[col]));
+		mpq_add (p_obj, p_obj, num1);
+		arr1 = qslp->A.matval + qslp->A.matbeg[col];
+		iarr1 = qslp->A.matind + qslp->A.matbeg[col];
+		mpq_set (num1, arr2[col]);
+		for (j = qslp->A.matcnt[col]; j--;)
+		{
+			mpq_mul (num2, arr1[j], d_sol[iarr1[j]]);
+			mpq_sub (num1, num1, num2);
+		}
+		mpq_set (dz[col], num1);
+		/* objective update */
+		if (objsense * mpq_cmp_ui (dz[col], 0UL, 1UL) > 0)
+		{
+			mpq_mul (num3, dz[col], arr3[col]);
+			mpq_add (d_obj, d_obj, num3);
+		}
+		else
+		{
+			mpq_mul (num3, dz[col], arr4[col]);
+			mpq_add (d_obj, d_obj, num3);
+		}
+
+		mpq_set_ui (num2, 0UL, 1UL);
+		if (objsense * mpq_cmp_ui (dz[col], 0UL, 1UL) > 0)
+		{
+			mpq_sub (num1, p_sol[i + qslp->nstruct], arr3[col]);
+			mpq_mul (num2, num1, dz[col]);
+		}
+		if (mpq_cmp_ui (num2, 0UL, 1UL) != 0)
+		{
+			rval = 0;
+			mpq_abs(current_violation, num2);
+			if (mpq_cmp(current_violation, max_violation) > 0)
+			{
+				mpq_set(max_violation, current_violation);
+				worst_type = 5; /* reuse type */
+				worst_index = i;
+				strncpy(worst_name, qslp->colnames[col], 255);
+				val1 = mpq_get_d(num1);
+				val2 = mpq_get_d(dz[col]);
+			}
+		}
+		mpq_set_ui (num2, 0UL, 1UL);
+		if (objsense * mpq_cmp_ui (dz[col], 0UL, 1UL) < 0)
+		{
+			mpq_sub (num1, p_sol[i + qslp->nstruct], arr4[col]);
+			mpq_mul (num2, num1, dz[col]);
+		}
+		if (mpq_cmp_ui (num2, 0UL, 1UL) != 0)
+		{
+			rval = 0;
+			mpq_abs(current_violation, num2);
+			if (mpq_cmp(current_violation, max_violation) > 0)
+			{
+				mpq_set(max_violation, current_violation);
+				worst_type = 6; /* reuse type */
+				worst_index = i;
+				strncpy(worst_name, qslp->colnames[col], 255);
+				val1 = mpq_get_d(arr4[col]);
+				val2 = mpq_get_d(p_sol[i+qslp->nstruct]);
+				val3 = mpq_get_d(dz[col]);
+			}
+		}
+	}
+
+	/* now check the objective values */
+	if (mpq_cmp (p_obj, d_obj) != 0)
+	{
+		rval = 0;
+		mpq_sub(current_violation, p_obj, d_obj);
+		mpq_abs(current_violation, current_violation);
+		if (mpq_cmp(current_violation, max_violation) > 0)
+		{
+			mpq_set(max_violation, current_violation);
+			worst_type = 7;
+		}
+	}
+
+	/* REPORT THE LARGEST VIOLATION IF FOUND */
+	if (rval == 0 && !msg_lvl)
+	{
+		switch (worst_type)
+		{
+			case 1:
+				MESSAGE(0, "WORST VIOLATION: item %s has empty feasible range [%lg,%lg]", worst_name, val1, val2);
+				break;
+			case 2:
+				MESSAGE(0, "WORST VIOLATION: solution is infeasible for constraint %s, max violation %lg", worst_name, mpq_get_d(max_violation));
+				break;
+			case 3:
+				MESSAGE(0, "WORST VIOLATION: constraint %s artificial (%lg) below lower bound (%lg), actual LHS (%lg), actual RHS (%lg)", worst_name, val1, val2, val3, val4);
+				break;
+			case 4:
+				MESSAGE(0, "WORST VIOLATION: constraint %s artificial (%lg) above upper bound (%lg)", worst_name, val1, val2);
+				break;
+			case 5:
+				MESSAGE(0, "WORST VIOLATION: lower bound (%s,%d) slack (%lg) and dual variable (%lg) don't satisfy complementary slackness (real)", worst_name, worst_index, val1, val2);
+				break;
+			case 6:
+				MESSAGE(0, "WORST VIOLATION: upper bound (%lg) variable (%lg) and dual variable (%lg) don't satisfy complementary slackness for variable (%s,%d) (real)", val1, val2, val3, worst_name, worst_index);
+				break;
+			case 7:
+				MESSAGE(0, "WORST VIOLATION: primal and dual objective value differ %lg %lg", mpq_get_d(p_obj), mpq_get_d(d_obj));
+				break;
+		}
+		goto CLEANUP; /* If it's not optimal, skip caching and jump to cleanup */
+	}
+
+	/* now we report optimality */
+	if(!msg_lvl)
+	{
+		MESSAGE(0, "Problem solved to optimality, LP value %lg", mpq_get_d(p_obj));
+	}
+	/* now we load into cache the solution */
+	if (!p->cache)
+	{
+		p->cache = EGsMalloc (mpq_ILLlp_cache, 1);
+		mpq_EGlpNumInitVar (p->cache->val);
+		mpq_ILLlp_cache_init (p->cache);
+	}
+	if (qslp->nrows != p->cache->nrows || qslp->nstruct != p->cache->nstruct)
+	{
+		mpq_ILLlp_cache_free (p->cache);
+		EGcallD(mpq_ILLlp_cache_alloc (p->cache, qslp->nstruct, qslp->nrows));
+	}
+	p->cache->status = QS_LP_OPTIMAL;
+	p->qstatus = QS_LP_OPTIMAL;
+	p->lp->basisstat.optimal = 1;
+	mpq_set (p->cache->val, p_obj);
+	for (i = qslp->nstruct; i--;)
+	{
+		mpq_set (p->cache->x[i], p_sol[i]);
+		mpq_set (p->cache->rc[i], dz[structmap[i]]);
+	}
+	for (i = qslp->nrows; i--;)
+	{
+		mpq_set (p->cache->slack[i], p_sol[i + qslp->nstruct]);
+		mpq_set (p->cache->pi[i], d_sol[i]);
+	}
+
+	/* save the problem and solution if enabled */
+#if QSEXACT_SAVE_OPTIMAL
+	{
+		char stmp[1024];
+		EGioFile_t *out_f = 0;
+		snprintf (stmp, 1023, "%s-opt%03d.lp", p->name ? p->name : "UNNAMED",
+							QSEXACT_SAVE_OPTIMAL_IND);
+		if (mpq_QSwrite_prob (p, stmp, "LP"))
+		{
+			rval = 0;
+			MESSAGE (0, "Couldn't write output problem %s", stmp);
+			goto CLEANUP;
+		}
+		snprintf (stmp, 1023, "%s-opt%03d.sol.gz", p->name ? p->name : "UNNAMED",
+							QSEXACT_SAVE_OPTIMAL_IND);
+		if (!(out_f = EGioOpen (stmp, "w+")))
+		{
+			rval = 0;
+			MESSAGE (0, "Couldn't open solution file %s", stmp);
+			goto CLEANUP;
+		}
+		if (QSexact_print_sol (p, out_f))
+		{
+			rval = 0;
+			MESSAGE (0, "Couldn't write output solution %s", stmp);
+			goto CLEANUP;
+		}
+		EGioClose (out_f);
+		QSEXACT_SAVE_OPTIMAL_IND++;
+	}
+#endif
+	rval = 1;
+
+	/* ending */
+CLEANUP:
+	// testing for log file
+        clock_t end = clock();
+        double duration = (double)(end - start) / CLOCKS_PER_SEC;
+        log_timing("QSexact_optimal_test took ", duration);
+
+
+	mpq_EGlpNumFreeArray (dz);
+	mpq_EGlpNumFreeArray (rhs_copy);
+	mpq_clear (num1);
+	mpq_clear (num2);
+	mpq_clear (num3);
+	mpq_clear (p_obj);
+	mpq_clear (d_obj);
+	mpq_clear (max_violation);
+	mpq_clear (current_violation);
+	return rval;
+}
+
 /* ========================================================================= */
 int QSexact_infeasible_test (mpq_QSdata * p, mpq_t * d_sol)
 {
@@ -850,7 +1346,7 @@ int QSexact_infeasible_test (mpq_QSdata * p, mpq_t * d_sol)
 	mpq_t *dl = 0,
 	 *du = 0;
 	int const msg_lvl = __QS_SB_VERB <= DEBUG ? 0 : 100000 * (1 - p->simplex_display);
-	int rval = 1;									/* store whether or not the solution is optimal, we start 
+	int rval = 1;									/* store whether or not the solution is optimal, we start
 																 * assuming it is. */
 	mpq_t num1,
 	  num2,
@@ -872,7 +1368,7 @@ int QSexact_infeasible_test (mpq_QSdata * p, mpq_t * d_sol)
 
 	/* compute the upper and lower bound dual variables, note that dl is the dual
 	 * of the lower bounds, and du the dual of the upper bound, dl <= 0 and du >=
-	 * 0 and A^t y + Idl + Idu = c, and the dual objective value is 
+	 * 0 and A^t y + Idl + Idu = c, and the dual objective value is
 	 * max y*b + l*dl + u*du */
 	du = mpq_EGlpNumAllocArray (qslp->ncols);
 	dl = mpq_EGlpNumAllocArray (qslp->ncols);
@@ -986,7 +1482,7 @@ static void infeasible_output (mpq_QSdata * p_mpq,
 /** @brief print into screen (if enable) a message indicating that we have
  * successfully solved the problem at optimality, and save (if x and y are non
  * NULL respectivelly) the optimal primal/dual solution provided in x_mpq and
- * y_mpq. 
+ * y_mpq.
  * @param p_mpq the problem data.
  * @param x where to store the optimal primal solution (if not null).
  * @param y where to store the optimal dual solution (if not null).
@@ -1040,14 +1536,14 @@ static int QSexact_basis_status (mpq_QSdata * p_mpq,
 	EGtimerStart (&local_timer);
 	// load and check the basis
 	EGcallD(mpq_QSload_basis (p_mpq, basis));
-	if (p_mpq->cache) 
+	if (p_mpq->cache)
 	{
 		mpq_ILLlp_cache_free (p_mpq->cache);
 		mpq_clear (p_mpq->cache->val);
 		ILL_IFFREE(p_mpq->cache);
 	}
 	p_mpq->qstatus = QS_LP_MODIFIED;
-	if(p_mpq->qslp->sinfo) 
+	if(p_mpq->qslp->sinfo)
 	{
 		mpq_ILLlp_sinfo_free(p_mpq->qslp->sinfo);
 		ILL_IFFREE(p_mpq->qslp->sinfo);
@@ -1057,7 +1553,7 @@ static int QSexact_basis_status (mpq_QSdata * p_mpq,
 		mpq_ILLlp_rows_clear (p_mpq->qslp->rA);
 		ILL_IFFREE(p_mpq->qslp->rA);
 	}
-	// rebuild internal lp 
+	// rebuild internal lp
 	mpq_free_internal_lpinfo (p_mpq->lp);
 	mpq_init_internal_lpinfo (p_mpq->lp);
 	EGcallD(mpq_build_internal_lpinfo (p_mpq->lp));
@@ -1098,20 +1594,20 @@ static int QSexact_basis_status (mpq_QSdata * p_mpq,
 	if(!msg_lvl)
 	{
 		MESSAGE(0, "Performing Rational Basic Solve on %s, %s, check"
-				" done in %lg seconds, PS %s %lg, DS %s %lg", p_mpq->name, 
-				(*status == QS_LP_OPTIMAL) ? "RAT_optimal" : 
-				((*status == QS_LP_INFEASIBLE) ?  "RAT_infeasible" : 
+				" done in %lg seconds, PS %s %lg, DS %s %lg", p_mpq->name,
+				(*status == QS_LP_OPTIMAL) ? "RAT_optimal" :
+				((*status == QS_LP_INFEASIBLE) ?  "RAT_infeasible" :
 				 ((*status == QS_LP_UNBOUNDED) ?  "RAT_unbounded" : "RAT_unsolved")),
-				local_timer.time, p_mpq->lp->basisstat.primal_feasible ? 
-				"F":(p_mpq->lp->basisstat.primal_infeasible ? "I" : "U"), 
+				local_timer.time, p_mpq->lp->basisstat.primal_feasible ?
+				"F":(p_mpq->lp->basisstat.primal_infeasible ? "I" : "U"),
 				p_mpq->lp->basisstat.primal_feasible ?
-				mpq_get_d(p_mpq->lp->objval) : 
+				mpq_get_d(p_mpq->lp->objval) :
 				(p_mpq->lp->basisstat.primal_infeasible ?
-				 mpq_get_d(p_mpq->lp->pinfeas) : mpq_get_d(p_mpq->lp->objbound)), 
-				p_mpq->lp->basisstat.dual_feasible ? 
-				"F":(p_mpq->lp->basisstat.dual_infeasible ? "I" : "U"), 
-				p_mpq->lp->basisstat.dual_feasible ? mpq_get_d(p_mpq->lp->dobjval) 
-				:(p_mpq->lp->basisstat.dual_infeasible ? 
+				 mpq_get_d(p_mpq->lp->pinfeas) : mpq_get_d(p_mpq->lp->objbound)),
+				p_mpq->lp->basisstat.dual_feasible ?
+				"F":(p_mpq->lp->basisstat.dual_infeasible ? "I" : "U"),
+				p_mpq->lp->basisstat.dual_feasible ? mpq_get_d(p_mpq->lp->dobjval)
+				:(p_mpq->lp->basisstat.dual_infeasible ?
 					mpq_get_d(p_mpq->lp->dinfeas) : mpq_get_d(p_mpq->lp->objbound)) );
 	}
 CLEANUP:
@@ -1125,7 +1621,7 @@ CLEANUP:
 }
 
 /* ========================================================================= */
-/** @brief test whether given basis is primal and dual feasible in rational arithmetic. 
+/** @brief test whether given basis is primal and dual feasible in rational arithmetic.
  * @param p_mpq   the problem data.
  * @param basis   basis to be tested.
  * @param result  where to store whether given basis is primal and dual feasible.
@@ -1151,7 +1647,7 @@ int QSexact_basis_optimalstatus(
 
    EGcallD(mpq_QSload_basis (p_mpq, basis));
 
-   if (p_mpq->cache) 
+   if (p_mpq->cache)
    {
       mpq_ILLlp_cache_free (p_mpq->cache);
       mpq_clear (p_mpq->cache->val);
@@ -1159,7 +1655,7 @@ int QSexact_basis_optimalstatus(
    }
    p_mpq->qstatus = QS_LP_MODIFIED;
 
-   if(p_mpq->qslp->sinfo) 
+   if(p_mpq->qslp->sinfo)
    {
       mpq_ILLlp_sinfo_free(p_mpq->qslp->sinfo);
       ILL_IFFREE(p_mpq->qslp->sinfo);
@@ -1180,13 +1676,13 @@ int QSexact_basis_optimalstatus(
    EGcallD(mpq_ILLbasis_factor (p_mpq->lp, &singular));
 
    memset (&(p_mpq->lp->basisstat), 0, sizeof (mpq_lp_status_info));
-   mpq_ILLfct_compute_piz (p_mpq->lp); 
+   mpq_ILLfct_compute_piz (p_mpq->lp);
    mpq_ILLfct_compute_dz (p_mpq->lp);
    mpq_ILLfct_compute_xbz (p_mpq->lp);
    mpq_ILLfct_check_pfeasible (p_mpq->lp, &fi, mpq_zeroLpNum);
    mpq_ILLfct_check_dfeasible (p_mpq->lp, &fi, mpq_zeroLpNum);
    mpq_ILLfct_set_status_values (p_mpq->lp, fi.pstatus, fi.dstatus, PHASEII, PHASEII);
-   
+
    if( p_mpq->lp->basisstat.optimal )
    {
       *result = 1;
@@ -1200,18 +1696,18 @@ int QSexact_basis_optimalstatus(
 
    if( !msg_lvl )
    {
-      MESSAGE(0, "Performing rational solution check for accuratelp on %s, sucess=%s", 
-         p_mpq->name, 
+      MESSAGE(0, "Performing rational solution check for accuratelp on %s, sucess=%s",
+         p_mpq->name,
          *result ? "YES" : "NO");
    }
-   
+
  CLEANUP:
    mpq_EGlpNumClearVar (fi.totinfeas);
    return rval;
 }
 
 /* ========================================================================= */
-/** @brief test whether given basis is dual feasible in rational arithmetic. 
+/** @brief test whether given basis is dual feasible in rational arithmetic.
  * @param p_mpq   the problem data.
  * @param basis   basis to be tested.
  * @param result  where to store whether given basis is dual feasible.
@@ -1235,7 +1731,7 @@ int QSexact_basis_dualstatus(
 	EGtimerReset (&local_timer);
 	EGtimerStart (&local_timer);
 	EGcallD(mpq_QSload_basis (p_mpq, basis));
-	if (p_mpq->cache) 
+	if (p_mpq->cache)
 	{
 		mpq_ILLlp_cache_free (p_mpq->cache);
 		mpq_clear (p_mpq->cache->val);
@@ -1243,7 +1739,7 @@ int QSexact_basis_dualstatus(
 	}
 	p_mpq->qstatus = QS_LP_MODIFIED;
 
-	if(p_mpq->qslp->sinfo) 
+	if(p_mpq->qslp->sinfo)
 	{
 		mpq_ILLlp_sinfo_free(p_mpq->qslp->sinfo);
 		ILL_IFFREE(p_mpq->qslp->sinfo);
@@ -1263,9 +1759,9 @@ int QSexact_basis_dualstatus(
 	EGcallD(mpq_ILLbasis_factor (p_mpq->lp, &singular));
 
 	memset (&(p_mpq->lp->basisstat), 0, sizeof (mpq_lp_status_info));
-	mpq_ILLfct_compute_piz (p_mpq->lp); 
+	mpq_ILLfct_compute_piz (p_mpq->lp);
 	mpq_ILLfct_compute_dz (p_mpq->lp);
-	mpq_ILLfct_compute_dobj(p_mpq->lp); 
+	mpq_ILLfct_compute_dobj(p_mpq->lp);
 	mpq_ILLfct_check_dfeasible (p_mpq->lp, &fi, mpq_zeroLpNum);
 	mpq_ILLfct_set_status_values (p_mpq->lp, fi.pstatus, fi.dstatus, PHASEII, PHASEII);
 
@@ -1281,7 +1777,7 @@ int QSexact_basis_dualstatus(
 	{
 		*result = 0;
 	}
-	else 
+	else
 	{
 		TESTG((rval=!(p_mpq->lp->basisstat.dual_unbounded)), CLEANUP, "Internal BUG, problem should be dual unbounded but is not");
 		*result = 1;
@@ -1295,9 +1791,9 @@ int QSexact_basis_dualstatus(
 
 	if(!msg_lvl)
 	{
-		MESSAGE(0, "Performing Rational Basic Test on %s, check done in %lg seconds, DS %s %lg", 
-				p_mpq->name, local_timer.time, 
-				p_mpq->lp->basisstat.dual_feasible ? "F": (p_mpq->lp->basisstat.dual_infeasible ? "I" : "U"), 
+		MESSAGE(0, "Performing Rational Basic Test on %s, check done in %lg seconds, DS %s %lg",
+				p_mpq->name, local_timer.time,
+				p_mpq->lp->basisstat.dual_feasible ? "F": (p_mpq->lp->basisstat.dual_infeasible ? "I" : "U"),
 				p_mpq->lp->basisstat.dual_feasible ? mpq_get_d(p_mpq->lp->dobjval) : (p_mpq->lp->basisstat.dual_infeasible ? mpq_get_d(p_mpq->lp->dinfeas) : mpq_get_d(p_mpq->lp->objbound)) );
 	}
 
@@ -1307,16 +1803,16 @@ CLEANUP:
 }
 
 /* ========================================================================= */
-/** @brief test whether given basis is dual feasible in rational arithmetic. 
- * if wanted it will first directly test the corresponding approximate dual and primal solution 
+/** @brief test whether given basis is dual feasible in rational arithmetic.
+ * if wanted it will first directly test the corresponding approximate dual and primal solution
  * (corrected via dual variables for bounds and primal variables for slacks if possible) for optimality
- * before performing the dual feasibility test on the more expensive exact basic solution. 
+ * before performing the dual feasibility test on the more expensive exact basic solution.
  * @param p_mpq   the problem data.
  * @param basis   basis to be tested.
  * @param useprestep whether to directly test approximate primal and dual solution first.
- * @param dbl_p_sol  approximate primal solution to use in prestep 
+ * @param dbl_p_sol  approximate primal solution to use in prestep
  *                   (NULL in order to compute it by dual simplex in double precision with given starting basis).
- * @param dbl_d_sol  approximate dual solution to use in prestep 
+ * @param dbl_d_sol  approximate dual solution to use in prestep
  *                   (NULL in order to compute it by dual simplex in double precision with given starting basis).
  * @param result  where to store whether given basis is dual feasible.
  * @param dobjval where to store dual solution value in case of dual feasibility (if not NULL).
@@ -1339,7 +1835,7 @@ int QSexact_verify (
    //assert(basis->nstruct);
 
    *result = 0;
-            
+
    if( useprestep )
    {
       mpq_t *x_mpq = 0;
@@ -1352,18 +1848,18 @@ int QSexact_verify (
          double *x_dbl = 0;
          double *y_dbl = 0;
 
-         /* create double problem, warmstart with given basis and solve it using double precision 
-          * this is only done to get approximate primal and dual solution corresponding to the given basis 
+         /* create double problem, warmstart with given basis and solve it using double precision
+          * this is only done to get approximate primal and dual solution corresponding to the given basis
           */
          p_dbl = QScopy_prob_mpq_dbl(p_mpq, "dbl_problem");
-   
+
          dbl_QSload_basis(p_dbl, basis);
          rval = dbl_ILLeditor_solve(p_dbl, DUAL_SIMPLEX);
          CHECKRVALG(rval, CLEANUP);
-      
+
          rval = dbl_QSget_status(p_dbl, &status);
          CHECKRVALG(rval, CLEANUP);
-      
+
          if( status == QS_LP_OPTIMAL )
          {
             /* get continued fraction approximation of approximate solution */
@@ -1376,7 +1872,7 @@ int QSexact_verify (
             CHECKRVALG(rval, CLEANUP);
             x_mpq = QScopy_array_dbl_mpq(x_dbl);
             y_mpq = QScopy_array_dbl_mpq(y_dbl);
-            
+
             /* test optimality of constructed solution */
             basis = dbl_QSget_basis(p_dbl);
             rval = QSexact_optimal_test(p_mpq, x_mpq, y_mpq, basis);
@@ -1388,12 +1884,12 @@ int QSexact_verify (
                   rval = mpq_QSget_objval(p_mpq, dobjval);
                   if( rval )
                      *result = 0;
-               }         
+               }
             }
             if( !msg_lvl )
             {
-               MESSAGE(0, "Performing approximated solution check on %s, sucess=%s dobjval=%lg", 
-                  p_mpq->name, 
+               MESSAGE(0, "Performing approximated solution check on %s, sucess=%s dobjval=%lg",
+                  p_mpq->name,
                   *result ? "YES" : "NO",
                   *result ? mpq_get_d(*dobjval) : mpq_get_d(*dobjval));
             }
@@ -1411,7 +1907,7 @@ int QSexact_verify (
          dbl_QSdata *p_dbl = 0;
          int i;
 
-         /* for some reason, this help to avoid fails in QSexact_basis_dualstatus() after 
+         /* for some reason, this help to avoid fails in QSexact_basis_dualstatus() after
           * the test here fails, i.e., if we would not perform the test here, than QSexact_basis_dualstatus() would normally not fail
           * something happens with the basis... if we do not set up the dbl-prob (?) ????????????????????????
           */
@@ -1429,7 +1925,7 @@ int QSexact_verify (
 
          for( i = 0; i < p_mpq->qslp->nrows; ++i )
             mpq_EGlpNumSet(y_mpq[i], dbl_d_sol[i]);
-            
+
          /* test optimality of constructed solution */
          basis = dbl_QSget_basis(p_dbl);
          rval = QSexact_optimal_test(p_mpq, x_mpq, y_mpq, basis);
@@ -1441,12 +1937,12 @@ int QSexact_verify (
                rval = mpq_QSget_objval(p_mpq, dobjval);
                if( rval )
                   *result = 0;
-            }         
+            }
          }
          if( !msg_lvl )
          {
-            MESSAGE(0, "Performing approximated solution check on %s, sucess=%s dobjval=%lg", 
-               p_mpq->name, 
+            MESSAGE(0, "Performing approximated solution check on %s, sucess=%s dobjval=%lg",
+               p_mpq->name,
                *result ? "YES" : "NO",
                *result ? mpq_get_d(*dobjval) : mpq_get_d(*dobjval));
          }
@@ -1462,8 +1958,8 @@ int QSexact_verify (
       rval = QSexact_basis_dualstatus(p_mpq, basis, result, dobjval, msg_lvl);
       if( !msg_lvl )
       {
-         MESSAGE(0, "Performing rational solution check on %s, sucess=%s dobjval=%lg", 
-            p_mpq->name, 
+         MESSAGE(0, "Performing rational solution check on %s, sucess=%s dobjval=%lg",
+            p_mpq->name,
             *result ? "YES" : "NO",
             *result ? mpq_get_d(*dobjval) : mpq_get_d(*dobjval));
       }
@@ -1474,7 +1970,7 @@ int QSexact_verify (
 
 /* ========================================================================= */
 int QSexact_solver (mpq_QSdata * p_mpq, mpq_t * const x, mpq_t * const y, QSbasis * const ebasis, int simplexalgo, int *status)
-{ 
+{
 	// clock start for timing purposes
         clock_t start = clock();     // full timer
 	clock_t dbl_start = clock(); // double timer
@@ -1519,7 +2015,7 @@ int QSexact_solver (mpq_QSdata * p_mpq, mpq_t * const x, mpq_t * const y, QSbasi
 		dbl_QSload_basis (p_dbl, ebasis); // AP: EGLPNUM_TYPENAME_QSload_basis in qsopt.c
 	if (dbl_ILLeditor_solve (p_dbl, simplexalgo))
 	{
-		MESSAGE(p_mpq->simplex_display ? 0: __QS_SB_VERB, 
+		MESSAGE(p_mpq->simplex_display ? 0: __QS_SB_VERB,
 						"double approximation failed, code %d, "
 						"continuing in extended precision", rval);
 		goto MPF_PRECISION;
@@ -1851,8 +2347,8 @@ int QSexact_solver (mpq_QSdata * p_mpq, mpq_t * const x, mpq_t * const y, QSbasi
         	double elapsed_mpf = (double)(mpf_end - mpf_start) / CLOCKS_PER_SEC;
         	char label[128];
         	snprintf(label, sizeof(label), "MPF solve at %u bits took ", precision);
-        	log_timing(label, elapsed_mpf);	
-	
+        	log_timing(label, elapsed_mpf);
+
 		mpf_QSfree_prob (p_mpf);
 		p_mpf = 0;
 	}
@@ -1895,7 +2391,7 @@ void QSexactStart(void)
 	if(__QSexact_setup) return;
 	/* we should call EGlpNumStart() */
 	EGlpNumStart();
-	
+
 	/* now we call all setups */
 	EXutilDoInit();
 	dbl_ILLstart();
@@ -1920,4 +2416,3 @@ void QSexactClear(void)
 /* ========================================================================= */
 /** @} */
 /* end of exact.c */
-

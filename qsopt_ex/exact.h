@@ -40,8 +40,8 @@
 
 /* ========================================================================= */
 /** @defgroup Esolver Esolver
- * Here we define an interface to solve LP's (#QSexact_solver) and MIP's 
- * exactly. 
+ * Here we define an interface to solve LP's (#QSexact_solver) and MIP's
+ * exactly.
  * @par History:
  * Revision 0.1
  * - 2005-11-14
@@ -110,17 +110,17 @@ mpf_QSdata *QScopy_prob_mpq_mpf (mpq_QSdata * p,
  * @param p_sol primal solution candidate.
  * @param d_sol dual solution candidate.
  * @param basis Basis for wich the current primal/dual vector is a solution.
- * @return one if the given primal/dual solution is optimal, zero otherwise. 
+ * @return one if the given primal/dual solution is optimal, zero otherwise.
  * @par Description:
  * The input problem has the form \f[ \begin{array}{l}\min cx\\
   s.t. \begin{array}{lcl}Ax&=&b\end{array}\\
   l\leq x\leq u\end{array} \f]
  * where some of the bounds can be \f$\infty\f$ or \f$-\infty\f$. Note that from
  * this the dual problem is allways feasible (we treat \f$\infty\f$ as a
- * suitable large number) because it looks like 
+ * suitable large number) because it looks like
  * \f[ \begin{array}{l}\max by + d_uu-d_ll\\
   s.t. \begin{array}{lcl}A^ty-Id_l+Id_u & =& c \end{array}\\
-  d_u,d_l\geq0\end{array} \f] thus we just need to check primal 
+  d_u,d_l\geq0\end{array} \f] thus we just need to check primal
  * feasibility and complementary slackness (just to be sure we also check that
  * both dual and primal objective values coincide.
  *
@@ -138,6 +138,14 @@ int QSexact_optimal_test (mpq_QSdata * p,
 													mpq_t * d_sol,
 													QSbasis * basis);
 
+/*
+ * Same as QSexact_optimal_test, but finds the max violation rather than the
+ * first violation encountered.
+ */
+int QSexact_optimal_test2 (mpq_QSdata * p,
+													mpq_t * p_sol,
+													mpq_t * d_sol,
+													QSbasis * basis);
 /* ========================================================================= */
 /** @brief Print into a file the optimal solution.
  * @param p original problem.
@@ -149,22 +157,22 @@ int QSexact_print_sol (mpq_QSdata * p,
 
 /* ========================================================================= */
 /** @brief Check if the given dual vector is a proof of infeasibility for the
- * given exact problem. 
+ * given exact problem.
  * @param p pointer to the problem data structure.
  * @param d_sol array of length at least nrows with the suposed proof of
  * infeasibility.
  * @return zero if the given dual vector is indeed a proof of infeasibility for
  * the problem, non zero otherwise.
  * @par Description:
- * Note that for infeasibility, we just need to proof that the problem 
- \f[ \begin{array}{ll} \min & 0\\ s.t. & Ax = b\\ & l\leq x\leq b\\ 
+ * Note that for infeasibility, we just need to proof that the problem
+ \f[ \begin{array}{ll} \min & 0\\ s.t. & Ax = b\\ & l\leq x\leq b\\
  \end{array} \f]
  * is infeasible, but it's dual is
- \f[ \begin{array}{ll} \max & by - ud_u + ld_l\\ s.t. & A^ty +Id_l - Id_u = 0\\ 
+ \f[ \begin{array}{ll} \max & by - ud_u + ld_l\\ s.t. & A^ty +Id_l - Id_u = 0\\
  & d_u,d_l\geq0\\ \end{array} \f]
- * wich is always feasible (provided \f$y\geq0\f$ (set \f$ (y,d_u,d_l)=0\f$), 
- * and thus we just need to check whether the objective value is \f$\neq 0\f$ 
- * and we have a proof of infeasibility for the primal. That's what this 
+ * wich is always feasible (provided \f$y\geq0\f$ (set \f$ (y,d_u,d_l)=0\f$),
+ * and thus we just need to check whether the objective value is \f$\neq 0\f$
+ * and we have a proof of infeasibility for the primal. That's what this
  * function perform as a test.
  * */
 int QSexact_infeasible_test (mpq_QSdata * p,
@@ -260,7 +268,7 @@ void QSexact_write_row (EGioFile_t * out_f,
 #endif
 
 /* ========================================================================= */
-/** @brief test whether given basis is primal and dual feasible in rational arithmetic. 
+/** @brief test whether given basis is primal and dual feasible in rational arithmetic.
  * @param p_mpq   the problem data.
  * @param basis   basis to be tested.
  * @param result  where to store whether given basis is primal and dual feasible.
@@ -274,7 +282,7 @@ int QSexact_basis_optimalstatus(
    );
 
 /* ========================================================================= */
-/** @brief test whether given basis is dual feasible in rational arithmetic. 
+/** @brief test whether given basis is dual feasible in rational arithmetic.
  * @param p_mpq   the problem data.
  * @param basis   basis to be tested.
  * @param result  where to store whether given basis is dual feasible.
@@ -290,16 +298,16 @@ int QSexact_basis_dualstatus(
    );
 
 /* ========================================================================= */
-/** @brief test whether given basis is dual feasible in rational arithmetic. 
- * if wanted it will first directly test the corresponding approximate dual and primal solution 
+/** @brief test whether given basis is dual feasible in rational arithmetic.
+ * if wanted it will first directly test the corresponding approximate dual and primal solution
  * (corrected via dual variables for bounds and primal variables for slacks if possible) for optimality
- * before performing the dual feasibility test on the more expensive exact basic solution. 
+ * before performing the dual feasibility test on the more expensive exact basic solution.
  * @param p_mpq   the problem data.
  * @param basis   basis to be tested.
  * @param useprestep whether to directly test approximate primal and dual solution first.
- * @param dbl_p_sol  approximate primal solution to use in prestep 
+ * @param dbl_p_sol  approximate primal solution to use in prestep
  *                   (NULL in order to compute it by dual simplex in double precision with given starting basis).
- * @param dbl_d_sol  approximate dual solution to use in prestep 
+ * @param dbl_d_sol  approximate dual solution to use in prestep
  *                   (NULL in order to compute it by dual simplex in double precision with given starting basis).
  * @param result  where to store whether given basis is dual feasible.
  * @param dobjval where to store dual solution value in case of dual feasibility (if not NULL).
@@ -318,13 +326,13 @@ int QSexact_verify (
 
 /* ========================================================================= */
 /** @brief Given an mpq_QSdata problem, solve it exactly.
- * @param x if not null, we store here the primal solution to the 
+ * @param x if not null, we store here the primal solution to the
  * problem (if it exist).
  * @param y if not null, we store here the dual solution to the
- * problem, 
+ * problem,
  * @param p_mpq problem to solve exactly.
  * @param status pointer to the integer where we will return the status
- * of the problem, either optimal, infeasible, or unbounded (we could also 
+ * of the problem, either optimal, infeasible, or unbounded (we could also
  * return time out).
  * @param simplexalgo whether to use primal or dual simplex while solving
  * to optimality the problem.
@@ -358,4 +366,3 @@ extern int __QSexact_setup;
 /* ========================================================================= */
 /* end of exact.h */
 #endif
-
