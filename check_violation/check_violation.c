@@ -131,8 +131,12 @@ int main(int argc, char **argv)
 		}
 		for (int i = 0; i < nstruct; i++)
 			mpq_set(x_struct[i], xz_full[qslp->structmap[i]]);
-		for (int i = 0; i < nrows; i++)
+		// flip sign for maximization
+		int flip = (qslp->objsense != QS_MIN);
+		for (int i = 0; i < nrows; i++) {
 			mpq_set(y_rows[i], p->lp->piz[i]);
+			if (flip) mpq_neg(y_rows[i], y_rows[i]);
+		}
 	}
 
 	/* QSexact_optimal_test returns 1 if (x, y, basis) is a certified optimum,

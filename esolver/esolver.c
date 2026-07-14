@@ -57,6 +57,7 @@ static int printsol = 0;
 static char *solname = 0;
 static char *readbasis = 0;
 static char *writebasis = 0;
+static int dump_bases = 0;
 /** @brief maximum running time */
 static double max_rtime = INT_MAX;
 /** @brief maximum memory usage */
@@ -69,6 +70,7 @@ static void usage (char *s)
 	fprintf (stderr, "Usage: %s [- below -] prob_file\n", s);
 	fprintf (stderr, "   -b f  write basis to file f\n");
 	fprintf (stderr, "   -B f  read initial basis from file f\n");
+	fprintf (stderr, "   -D    dump basis matrix snapshots to <problem>_Bases/\n");
 #if 0
 	fprintf (stderr, "   -I    solve the MIP using BestBound\n");
 	fprintf (stderr, "   -E    edit problem after solving initial version\n");
@@ -202,7 +204,7 @@ static int parseargs (int ac, char **av)
 	int boptind = 1;
 	char *boptarg = 0;
 
-	while ((c = ILLutil_bix_getopt (ac, av, "b:B:d:EILm:O:p:P:R:STvN:", &boptind, &boptarg)) != EOF)
+	while ((c = ILLutil_bix_getopt (ac, av, "b:B:d:DEILm:O:p:P:R:STvN:", &boptind, &boptarg)) != EOF)
 		switch (c)
 		{
 		case 'm':
@@ -223,6 +225,9 @@ static int parseargs (int ac, char **av)
 		case 'd':
 			simplexalgo = DUAL_SIMPLEX;
 			dstrategy = atoi (boptarg);
+			break;
+		case 'D':
+			dump_bases = 1;
 			break;
 		case 'L':
 			lpfile = 1;
@@ -288,19 +293,11 @@ static void derive_problem_name (const char *path, char *out, size_t outsz)
 	if (dot) *dot = 0;
 }
 
-/* Write a sparse rational matrix as an integer-scaled matrix in triplet form.
- *
- * Each row i is scaled by L_i = lcm of the denominators of its nonzero
- * entries, so every stored value becomes the integer num * (L_i / den).
- * The original entry can be recovered as int_val / L_i.
+/* Write a sparse rational matrix in COO triplet form.
  *
  * File format:
  *   nrows ncols nnz
- *   L_0
- *   L_1
- *   ...
- *   L_{nrows-1}
- *   row col int_val            (repeated nnz times)
+ *   row col val            (repeated nnz times; val is a GMP rational num/den)
  */
 static int write_sparse_mpq_matrix (const char *path, int nrows, int ncols,
 		const mpq_t *matval, const int *matbeg, const int *matcnt, const int *matind)
@@ -313,46 +310,18 @@ static int write_sparse_mpq_matrix (const char *path, int nrows, int ncols,
 	int nnz = 0;
 	for (int j = 0; j < ncols; ++j) nnz += matcnt[j];
 
-	mpz_t *L = malloc ((size_t)nrows * sizeof (mpz_t));
-	for (int i = 0; i < nrows; ++i) mpz_init_set_ui (L[i], 1UL);
-	for (int j = 0; j < ncols; ++j) {
-		int beg = matbeg[j], cnt = matcnt[j];
-		for (int k = 0; k < cnt; ++k) {
-			int row = matind[beg + k];
-			const mpq_t *v = &matval[beg + k];
-			if (mpz_sgn (mpq_numref (*v)) == 0) continue;
-			mpz_lcm (L[row], L[row], mpq_denref (*v));
-		}
-	}
-
 	EGioPrintf (f, "%d %d %d\n", nrows, ncols, nnz);
 	char numbuf[8192];
-	for (int i = 0; i < nrows; ++i) {
-		gmp_snprintf (numbuf, sizeof (numbuf), "%Zd", L[i]);
-		EGioPrintf (f, "%s\n", numbuf);
-	}
-
-	mpz_t scaled;
-	mpz_init (scaled);
 	for (int j = 0; j < ncols; ++j) {
 		int beg = matbeg[j], cnt = matcnt[j];
 		for (int k = 0; k < cnt; ++k) {
 			int row = matind[beg + k];
 			const mpq_t *v = &matval[beg + k];
-			if (mpz_sgn (mpq_numref (*v)) == 0) {
-				EGioPrintf (f, "%d %d 0\n", row, j);
-				continue;
-			}
-			mpz_divexact (scaled, L[row], mpq_denref (*v));
-			mpz_mul (scaled, scaled, mpq_numref (*v));
-			gmp_snprintf (numbuf, sizeof (numbuf), "%Zd", scaled);
+			gmp_snprintf (numbuf, sizeof (numbuf), "%Qd", *v);
 			EGioPrintf (f, "%d %d %s\n", row, j, numbuf);
 		}
 	}
-	mpz_clear (scaled);
 
-	for (int i = 0; i < nrows; ++i) mpz_clear (L[i]);
-	free (L);
 	EGioClose (f);
 	return 0;
 }
@@ -447,48 +416,19 @@ static int dump_one_basis (const char *dir, int k, int nrows_qs,
 	int nnz = 0;
 	for (int j = 0; j < nrows_qs; ++j) nnz += qslp->A.matcnt[baz[j]];
 
-	mpz_t *L = malloc ((size_t)nrows_qs * sizeof (mpz_t));
-	for (int i = 0; i < nrows_qs; ++i) mpz_init_set_ui (L[i], 1UL);
-	for (int j = 0; j < nrows_qs; ++j) {
-		int col = baz[j];
-		int beg = qslp->A.matbeg[col], cnt = qslp->A.matcnt[col];
-		for (int k2 = 0; k2 < cnt; ++k2) {
-			int row = qslp->A.matind[beg + k2];
-			const mpq_t *v = &qslp->A.matval[beg + k2];
-			if (mpz_sgn (mpq_numref (*v)) == 0) continue;
-			mpz_lcm (L[row], L[row], mpq_denref (*v));
-		}
-	}
-
 	EGioPrintf (f, "%d %d %d\n", nrows_qs, nrows_qs, nnz);
 	char numbuf[8192];
-	for (int i = 0; i < nrows_qs; ++i) {
-		gmp_snprintf (numbuf, sizeof (numbuf), "%Zd", L[i]);
-		EGioPrintf (f, "%s\n", numbuf);
-	}
-
-	mpz_t scaled;
-	mpz_init (scaled);
 	for (int j = 0; j < nrows_qs; ++j) {
 		int col = baz[j];
 		int beg = qslp->A.matbeg[col], cnt = qslp->A.matcnt[col];
 		for (int k2 = 0; k2 < cnt; ++k2) {
 			int row = qslp->A.matind[beg + k2];
 			const mpq_t *v = &qslp->A.matval[beg + k2];
-			if (mpz_sgn (mpq_numref (*v)) == 0) {
-				EGioPrintf (f, "%d %d 0\n", row, j);
-				continue;
-			}
-			mpz_divexact (scaled, L[row], mpq_denref (*v));
-			mpz_mul (scaled, scaled, mpq_numref (*v));
-			gmp_snprintf (numbuf, sizeof (numbuf), "%Zd", scaled);
+			gmp_snprintf (numbuf, sizeof (numbuf), "%Qd", *v);
 			EGioPrintf (f, "%d %d %s\n", row, j, numbuf);
 		}
 	}
-	mpz_clear (scaled);
 
-	for (int i = 0; i < nrows_qs; ++i) mpz_clear (L[i]);
-	free (L);
 	EGioClose (f);
 	return 0;
 }
@@ -724,7 +664,7 @@ int main (int ac, char **av)
 	rval = QSexact_solver (p_mpq, x_mpq, y_mpq, basis, simplexalgo, &status);
 	ILL_CLEANUP_IF (rval);
 	ILLutil_stop_timer (&timer_solve, 1);
-	dump_basis_snapshots (p_mpq, fname);
+	if (dump_bases) dump_basis_snapshots (p_mpq, fname);
 	if (printsol)
 	{
 		char out_f_name[1024];
